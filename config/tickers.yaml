@@ -1,0 +1,192 @@
+- ticker: VST
+  name: Vistra Corp.
+  aliases: ["VST", "Vistra"]
+  sector: Utilities
+  tier: 1
+  cik: "0001692819"
+  instrument_type: stock
+  exchange: NYSE
+  benchmark: XLU
+  suppliers: []
+  customers: []
+- ticker: CEG
+  name: Constellation Energy Corporation
+  aliases: ["CEG", "Constellation Energy"]
+  sector: Utilities
+  tier: 1
+  cik: "0001868275"
+  instrument_type: stock
+  exchange: NASDAQ
+  benchmark: XLU
+  suppliers: []
+  customers: []
+- ticker: EXC
+  name: Exelon Corporation
+  aliases: ["EXC", "Exelon"]
+  sector: Utilities
+  tier: 1
+  cik: "0001109357"
+  instrument_type: stock
+  exchange: NASDAQ
+  benchmark: XLU
+  suppliers: []
+  customers: []
+- ticker: D
+  name: Dominion Energy, Inc.
+  aliases: ["D", "Dominion Energy", "Dominion"]
+  sector: Utilities
+  tier: 1
+  cik: "0000715957"
+  instrument_type: stock
+  exchange: NYSE
+  benchmark: XLU
+  suppliers: []
+  customers: []
+- ticker: CCJ
+  name: Cameco Corporation
+  aliases: ["CCJ", "Cameco"]
+  sector: Materials
+  tier: 1
+  cik: "0001009001"
+  instrument_type: stock
+  exchange: NYSE
+  benchmark: XLB
+  suppliers: []
+  customers: ["CEG", "VST", "EXC", "D"]
+- ticker: LEU
+  name: Centrus Energy Corp.
+  aliases: ["LEU", "Centrus Energy"]
+  sector: Energy
+  tier: 1
+  cik: "0001068875"
+  instrument_type: stock
+  exchange: "NYSE American"
+  benchmark: XLE
+  suppliers: ["CCJ", "UUUU"]
+  customers: ["CEG", "VST", "EXC", "D"]
+- ticker: NKE
+  name: NIKE, Inc.
+  aliases: ["NKE", "Nike"]
+  sector: Consumer Discretionary
+  tier: 1
+  cik: "0000320187"
+  instrument_type: stock
+  exchange: NYSE
+  benchmark: XLY
+  suppliers: []
+  customers: []
+- ticker: AZO
+  name: AutoZone, Inc.
+  aliases: ["AZO", "AutoZone"]
+  sector: Consumer Discretionary
+  tier: 1
+  cik: "0000866787"
+  instrument_type: stock
+  exchange: NYSE
+  benchmark: XLY
+  suppliers: []
+  customers: []
+- ticker: PEG
+  name: Public Service Enterprise Group Incorporated
+  aliases: ["PEG", "PSEG", "Public Service Enterprise Group"]
+  sector: Utilities
+  tier: 2
+  cik: "0000078878"
+  instrument_type: stock
+  exchange: NYSE
+  benchmark: XLU
+  suppliers: []
+  customers: []
+- ticker: ETN
+  name: Eaton Corporation plc
+  aliases: ["ETN", "Eaton"]
+  sector: Industrials
+  tier: 2
+  cik: "0001551182"
+  instrument_type: stock
+  exchange: NYSE
+  benchmark: XLI
+  suppliers: []
+  customers: ["VST", "CEG", "EXC", "D", "PEG"]
+- ticker: UUUU
+  name: Energy Fuels Inc.
+  aliases: ["UUUU", "Energy Fuels"]
+  sector: Materials
+  tier: 2
+  cik: "0001385849"
+  instrument_type: stock
+  exchange: "NYSE American"
+  benchmark: XLB
+  suppliers: []
+  customers: ["LEU"]
+- ticker: NLR
+  name: VanEck Uranium and Nuclear ETF
+  aliases: ["NLR", "VanEck Uranium and Nuclear"]
+  sector: Utilities
+  tier: 3
+  cik: ""
+  instrument_type: etf
+  exchange: "NYSE Arca"
+  benchmark: XLU
+  underlying: "Nuclear Energy"
+  suppliers: ["CEG", "VST", "EXC", "D", "PEG"]
+  customers: []
+- ticker: URA
+  name: Global X Uranium ETF
+  aliases: ["URA", "Global X Uranium"]
+  sector: Materials
+  tier: 3
+  cik: ""
+  instrument_type: etf
+  exchange: "NYSE Arca"
+  benchmark: XLB
+  underlying: "Uranium"
+  suppliers: ["CCJ", "LEU", "UUUU"]
+  customers: []
+- ticker: COPX
+  name: Global X Copper Miners ETF
+  aliases: ["COPX", "Global X Copper Miners"]
+  sector: Materials
+  tier: 3
+  cik: ""
+  instrument_type: etf
+  exchange: "NYSE Arca"
+  benchmark: XLB
+  underlying: "Copper"
+  suppliers: []
+  customers: []
+- ticker: GDX
+  name: VanEck Gold Miners ETF
+  aliases: ["GDX", "VanEck Gold Miners"]
+  sector: Materials
+  tier: 3
+  cik: ""
+  instrument_type: etf
+  exchange: "NYSE Arca"
+  benchmark: GLD
+  underlying: "Gold (XAU/USD)"
+  suppliers: []
+  customers: []
+- ticker: ACLS
+  name: Axcelis Technologies, Inc.
+  aliases: ["ACLS", "Axcelis"]
+  sector: Technology
+  tier: 3
+  cik: "0001113232"
+  instrument_type: stock
+  exchange: NASDAQ
+  benchmark: XLK
+  suppliers: []
+  customers: []
+- ticker: PALL
+  name: abrdn Physical Palladium Shares ETF
+  aliases: ["PALL", "Aberdeen Palladium", "abrdn Palladium"]
+  sector: Materials
+  tier: 3
+  cik: ""
+  instrument_type: etf
+  exchange: "NYSE Arca"
+  benchmark: GLD
+  underlying: "Palladium"
+  suppliers: []
+  customers: []

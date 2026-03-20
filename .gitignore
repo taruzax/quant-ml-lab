@@ -1,0 +1,7 @@
+/*agents
+*.png
+/*scratch
+.venv
+__pycache__
+AGENTS.MD
+/tests

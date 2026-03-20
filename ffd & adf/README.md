@@ -8,15 +8,13 @@ raw OHLCV market data, engineers financial features using polars, and applies
 ## Project Structure
 
 ```
-ffd/
+ffd & adf/
 ├── src/
 │   ├── data/
 │   │   ├── loader.py       # Market data ingestion (Yahoo Finance → Polars)
 │   │   └── transform.py    # Feature engineering + FFD + ADF optimizer
 │   └── pipelines/
 │       └── ingestion.py    # End-to-end pipeline entry point
-tests/
-└── test_frac_diff.py       # Unit + integration tests for FFD and ADF
 config/
 └── tickers.yaml            # Ticker universe with sector/tier metadata
 data/

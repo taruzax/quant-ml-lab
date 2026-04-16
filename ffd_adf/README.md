@@ -4,8 +4,7 @@ This module is the **data factory** for `quant-ml-lab`. It downloads
 raw OHLCV market data, engineers financial features using polars, and applies
 **Fractional Differencing (FFD)** to produce stationary, memory-preserving inputs ready for downstream ML models.
 
-Article behind this repo: [https://zaurtarunov.substack.com/p/fractional-differencing](https://zaurtarunov.substack.com/p/fractional-differencing)
----
+Article behind this repo: [Fractional Differencing Article](https://zaurtarunov.substack.com/p/fractional-differencing)
 
 ## Project Structure
 

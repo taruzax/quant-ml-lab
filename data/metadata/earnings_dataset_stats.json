@@ -1,0 +1,17 @@
+{
+  "total_transcripts": 11411,
+  "unique_tickers": 858,
+  "date_range": {
+    "min": "2017-01-12",
+    "max": "2024-09-04"
+  },
+  "columns": [
+    "ticker",
+    "date",
+    "participants",
+    "prepared_remarks",
+    "questions_and_answers"
+  ],
+  "source": "BUILDERlym/STRUX-Transcripts (HuggingFace)",
+  "citation": "Lu et al., NAACL 2025, arXiv 2410.12583"
+}

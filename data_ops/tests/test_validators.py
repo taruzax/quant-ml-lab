@@ -3,7 +3,7 @@ import pytest
 import numpy as np
 
 # pyrefly: ignore [missing-import]
-from src.data_factory.validators import (
+from src.data.validators import (
     DataValidationError,
     validate_schema,
     validate_nulls,

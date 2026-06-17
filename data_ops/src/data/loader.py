@@ -85,7 +85,7 @@ def load_market_data(tickers: list[str], interval:str, start: str, end: str = No
     merged_pd = restructure_and_merge_data(stocks_df, sector_df)
 
     print("Data successfully loaded.")
-    return pl.DataFrame(merged_pd.reset_index())
+    return pl.DataFrame(merged_pd.reset_index()).sort(["ticker", "date"])
 
 
 def save_model_data(df: pl.DataFrame, directory: str = "data/raw", filename: str = "model_data"):

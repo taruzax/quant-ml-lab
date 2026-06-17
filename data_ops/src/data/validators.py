@@ -77,7 +77,7 @@ def validate_monotonic_dates(df, date_col="date", group_col="ticker"):
         raise DataValidationError(f"Date column '{date_col}' not found.")
     
     violations = (
-        df.sort(date_col).with_columns(prev_date = pl.col(date_col).shift(1).over(group_col)
+        df.with_columns(prev_date = pl.col(date_col).shift(1).over(group_col)
         ).filter(pl.col('prev_date').is_not_null() & (pl.col(date_col)< pl.col('prev_date')))
     )
 

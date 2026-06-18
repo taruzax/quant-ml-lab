@@ -23,7 +23,7 @@ class PipelineConfig(BaseSettings):
     min_price: float = 0.0
 
     # Tensor factory
-    sequence_length: int = 60
+    sequence_len: int = 60
     batch_size: int = 32
     train_cutoff_date: str | None = None
 

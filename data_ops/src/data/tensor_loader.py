@@ -50,9 +50,8 @@ class TimeSeriesDataset(Dataset):
         df = df.sort(group_col,date_col)
         for group_name, group_df in df.group_by(group_col, maintain_order=True):
             n_rows = group_df.height
-            if n_rows < sequence_len + 1:
-                ticker_name = group_name[0] if isinstance(group_name, tuple) else group_name
-                
+            ticker_name = group_name[0] if isinstance(group_name, tuple) else group_name
+            if n_rows < sequence_len + 1:   
                 logger.warning(
                     "Ticker '%s' has %d rows, need %d + 1. Skipping.",
                     ticker_name, n_rows, sequence_len,
@@ -63,7 +62,6 @@ class TimeSeriesDataset(Dataset):
             targets_np = group_df.select(target_cols).to_numpy().astype(np.float32)
             
             if np.isnan(features_np).any() or np.isnan(targets_np).any():
-                ticker_name = group_name[0] if isinstance(group_name, tuple) else group_name
                 raise DataValidationError(
                     f"NaN detected in ticker '{ticker_name}' after numpy conversion."
                 )

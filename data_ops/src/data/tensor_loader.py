@@ -47,8 +47,8 @@ class TimeSeriesDataset(Dataset):
             )
         
         self._windows: list[tuple[np.ndarray, np.ndarray]] = []
-        for group_name, group_df in df.group_by(group_col):
-            group_df = group_df.sort(date_col)
+        df = df.sort(group_col,date_col)
+        for group_name, group_df in df.group_by(group_col, maintain_order=True):
             n_rows = group_df.height
             if n_rows < sequence_len + 1:
                 ticker_name = group_name[0] if isinstance(group_name, tuple) else group_name

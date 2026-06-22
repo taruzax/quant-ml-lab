@@ -46,8 +46,13 @@ class TimeSeriesDataset(Dataset):
                 f"Columns have nulls (drop before creating dataset): {detail}"
             )
         
-        self._windows: list[tuple[np.ndarray, np.ndarray]] = []
-        df = df.sort(group_col,date_col)
+
+        self._feature_blocks: list[torch.Tensor] = []
+        self._target_blocks: list[torch.Tensor] = []
+        self._index_map: list[tuple[int, int]] = []
+        
+        df = df.sort(group_col, date_col)
+        
         for group_name, group_df in df.group_by(group_col, maintain_order=True):
             n_rows = group_df.height
             ticker_name = group_name[0] if isinstance(group_name, tuple) else group_name
@@ -65,20 +70,23 @@ class TimeSeriesDataset(Dataset):
                 raise DataValidationError(
                     f"NaN detected in ticker '{ticker_name}' after numpy conversion."
                 )
-            for i in range(n_rows - sequence_len):
-                feature_window = features_np[i:i+sequence_len]
-                target_vector = targets_np[i+sequence_len-1]
-                self._windows.append((feature_window, target_vector))
+
+            block_idx = len(self._feature_blocks)
+            self._feature_blocks.append(torch.from_numpy(features_np))
+            self._target_blocks.append(torch.from_numpy(targets_np))
+            
+            n_windows = n_rows - sequence_len
+            for i in range(n_windows):
+                self._index_map.append((block_idx, i))
     
     def __len__(self):
-        return len(self._windows)
+        return len(self._index_map)
     
     def __getitem__(self, idx):
-        features, targets = self._windows[idx]
-        return(
-            torch.from_numpy(features),
-            torch.from_numpy(targets),
-        )
+        block_idx, start = self._index_map[idx]
+        features = self._feature_blocks[block_idx][start : start + self.sequence_len]
+        target = self._target_blocks[block_idx][start + self.sequence_len - 1]
+        return features, target
 
 
 def create_dataloaders(df, feature_cols, target_cols, config:PipelineConfig, date_col: str = "date",):

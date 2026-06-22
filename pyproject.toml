@@ -16,6 +16,7 @@ dependencies = [
     "polars-talib>=0.1.5",
     "pyarrow>=23.0.1",
     "pydantic>=2.13.0",
+    "pydantic-settings>=2.14.1",
     "pytest>=9.0.3",
     "pytorch-forecasting>=1.7.0",
     "pyyaml>=6.0.3",
@@ -28,3 +29,10 @@ dependencies = [
     "xgboost<3",
     "yfinance>=1.2.0",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.uv.workspace]
+members = ["data_ops"]

@@ -5,12 +5,12 @@
 __pycache__
 AGENTS.MD
 log.md
-/tests
 .env
 .vscode
 /earning_calls_ONHOLD
-
+*notebooks
 # local data files
 *.parquet
 *.jsonl
 .DS_Store
+.pytest_cache

@@ -14,33 +14,8 @@ from src.data.features import (
 # pyrefly: ignore [missing-import]
 from src.core.schemas import return_col, lagged_col, target_col
 
-
-def _make_feature_df(n: int = 200) -> pl.DataFrame:
-    """Create a plausible OHLCV+sector DataFrame for feature testing."""
-    np.random.seed(42)
-    dates = pl.date_range(
-        start=pl.date(2024, 1, 1),
-        end=pl.date(2024, 1, 1) + pl.duration(days=n - 1),
-        interval="1d",
-        eager=True,
-    )
-    close = 100.0 + np.cumsum(np.random.normal(0, 1, n))
-    close = np.maximum(close, 1.0)
-    return pl.DataFrame({
-        "date": dates,
-        "ticker": ["TEST"] * n,
-        "open": close * 0.99,
-        "high": close * 1.02,
-        "low": close * 0.98,
-        "close": close,
-        "volume": np.random.uniform(1e6, 1e7, n),
-        "sector": ["Technology"] * n,
-        "industry": ["Software"] * n,
-    })
-
-
-def test_dollar_volume_columns_exist():
-    df = _make_feature_df()
+def test_dollar_volume_columns_exist(single_ticker_df):
+    df = single_ticker_df
     result = calculate_dollar_volume(df)
     for col in ["dollar_vol", "dollar_vol_1m", "dollar_vol_rank"]:
         assert col in result.columns, f"Missing column: {col}"
@@ -60,9 +35,9 @@ def test_returns_correct_values():
     assert abs(returns[1] - 0.10) < 0.01
 
 
-def test_lagged_features_reference_correct_column():
+def test_lagged_features_reference_correct_column(single_ticker_df):
     """CRITICAL: Verify return_1d_lag1 is actually a shift of return_1d, NOT return_63d."""
-    df = _make_feature_df(n=200)
+    df = single_ticker_df
     df = calculate_returns(df, lags=[1, 5, 10, 21, 42, 63])
     result = calculate_lagged_features(df, return_lags=[1], lookback_periods=[1])
 
@@ -80,9 +55,9 @@ def test_lagged_features_reference_correct_column():
     )
 
 
-def test_forward_targets_shift_correctly():
+def test_forward_targets_shift_correctly(single_ticker_df):
     """target_1d should be return_1d shifted by -1 (one step into the future)."""
-    df = _make_feature_df(n=50)
+    df = single_ticker_df
     df = calculate_returns(df, lags=[1])
     result = calculate_forward_targets(df, horizons=[1])
 

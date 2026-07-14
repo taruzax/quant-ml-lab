@@ -63,10 +63,10 @@ def test_short_ticker_skipped():
     assert len(ds) == 0
 
 
-def test_time_based_split():
+def test_time_based_split(pipeline_config):
     df = _make_tensor_df(n=100)
-    config = PipelineConfig(sequence_len=10, batch_size=4, train_cutoff_date="2024-03-10")
-    train_loader, val_loader = create_dataloaders(df, ["f1", "f2", "f3"], ["target_1d"], config)
+    pipeline_config.train_cutoff_date = "2024-03-10"
+    train_loader, val_loader = create_dataloaders(df, ["f1", "f2", "f3"], ["target_1d"], pipeline_config)
     assert train_loader is not None
     # Verify train dates are before val dates
     train_dates = df.filter(pl.col("date").cast(pl.Utf8) <= "2024-03-10")["date"].max()
@@ -75,10 +75,10 @@ def test_time_based_split():
         assert train_dates <= val_dates
 
 
-def test_batch_shape():
+def test_batch_shape(pipeline_config):
     df = _make_tensor_df(n=100)
-    config = PipelineConfig(sequence_len=10, batch_size=8)
-    train_loader, _ = create_dataloaders(df, ["f1", "f2", "f3"], ["target_1d"], config)
+    pipeline_config.batch_size = 8
+    train_loader, _ = create_dataloaders(df, ["f1", "f2", "f3"], ["target_1d"], pipeline_config)
     batch_features, batch_targets = next(iter(train_loader))
     assert batch_features.shape[1] == 10  # sequence_len
     assert batch_features.shape[2] == 3   # n_features

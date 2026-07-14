@@ -29,7 +29,7 @@ class PipelineConfig(BaseSettings):
 
     # Risk engine
     max_position_size: float = 0.20
-    min_position_size: float = 0.0
+    min_position_size: float = 0.05
 
     # Returns
     return_lags: list[int] = [1, 5, 10, 21, 42, 63]

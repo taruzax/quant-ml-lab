@@ -1,4 +1,7 @@
-This subproject (data_ops) is structured as a standalone workspace member within the quant-ml-lab monorepo. It maintains its own localized settings, data schemas, and test suites to remain fully decoupled and portable, while sharing a unified root virtual environment managed via uv workspace configuration. For development, executing the pipelines, or running the testing suite, navigate directly into this directory so that local environment variables (.env) and configurations are correctly resolved relative to the subproject root.
+This repository is a Quantitative Machine Learning Infrastructure Pipeline. It is designed to ingest raw financial time-series data (OHLCV), validate it, engineer predictive features (including advanced stationarity techniques), convert it into sliding-window tensors for deep learning models (PyTorch), and finally pass predictions through a sophisticated Risk Engine for portfolio optimization.
+
+It relies heavily on Polars for ultra-fast, memory-efficient data manipulation and PyTorch for deep learning integration.
+
 
 ### 📝 Article Behind Zero-Copy Sliding Windows:
 

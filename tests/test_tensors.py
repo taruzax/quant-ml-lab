@@ -4,11 +4,11 @@ import polars as pl
 import pytest
 import torch
 # pyrefly: ignore [missing-import]
-from src.data.tensor_loader import TimeSeriesDataset, create_dataloaders
+from lab.data.tensor_loader import TimeSeriesDataset, create_dataloaders
 # pyrefly: ignore [missing-import]
-from src.data.validators import DataValidationError
+from lab.data.validators import DataValidationError
 # pyrefly: ignore [missing-import]
-from src.core.config import PipelineConfig
+from lab.core.config import PipelineConfig
 
 
 def _make_tensor_df(n: int = 50, n_tickers: int = 1) -> pl.DataFrame:

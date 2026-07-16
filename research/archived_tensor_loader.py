@@ -16,9 +16,9 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 # pyrefly: ignore [missing-import]
-from src.core.config import PipelineConfig
+from lab.core.config import PipelineConfig
 # pyrefly: ignore [missing-import]
-from src.data.validators import DataValidationError
+from lab.data.validators import DataValidationError
 
 logger = logging.getLogger(__name__)
 

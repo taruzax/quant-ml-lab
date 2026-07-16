@@ -1,8 +1,8 @@
 import polars as pl 
 # pyrefly: ignore [missing-import]
-from src.core.config import PipelineConfig
+from lab.core.config import PipelineConfig
 # pyrefly: ignore [missing-import]
-from src.core.schemas import PRICE_COLUMNS, REQUIRED_OHLCV_COLUMNS, REQUIRED_DTYPES
+from lab.core.schemas import PRICE_COLUMNS, REQUIRED_OHLCV_COLUMNS, REQUIRED_DTYPES
 
 class DataValidationError(Exception):
  """Raised when data fails pipeline quality checks."""

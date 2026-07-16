@@ -8,7 +8,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # pyrefly: ignore [missing-import]
-from src.data.tensor_loader import TimeSeriesDataset
+from lab.data.tensor_loader import TimeSeriesDataset
 # pyrefly: ignore [missing-import]
 # from archive.archived_tensor_loader import TimeSeriesDataset
 

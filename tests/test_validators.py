@@ -3,7 +3,7 @@ import pytest
 import numpy as np
 
 # pyrefly: ignore [missing-import]
-from src.data.validators import (
+from lab.data.validators import (
     DataValidationError,
     validate_schema,
     validate_nulls,
@@ -12,7 +12,7 @@ from src.data.validators import (
     run_all_validations,
 )
 # pyrefly: ignore [missing-import]
-from src.core.config import PipelineConfig
+from lab.core.config import PipelineConfig
 
 
 def test_valid_data_passes(single_ticker_df):

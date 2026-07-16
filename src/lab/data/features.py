@@ -4,9 +4,9 @@ import numpy as np
 import warnings
 
 # pyrefly: ignore [missing-import]
-from src.core.config import PipelineConfig
+from lab.core.config import PipelineConfig
 # pyrefly: ignore [missing-import]
-from src.core.schemas import return_col, lagged_col, target_col
+from lab.core.schemas import return_col, lagged_col, target_col
 
 def calculate_dollar_volume(df: pl.DataFrame) -> pl.DataFrame:
     """Migrated from transform.py"""
@@ -27,13 +27,10 @@ def calculate_dollar_volume(df: pl.DataFrame) -> pl.DataFrame:
 def calculate_technical_indicators(df: pl.DataFrame) -> pl.DataFrame:
     """Migrated from transform.py"""
     return df.with_columns(
-        pl.col("close").ta.ema(5).over("ticker").alias("ema5"),
-        pl.col("close").ta.macd(12, 26, 9).over("ticker").struct.field("macd"),
-        pl.col("close").ta.macd(12, 26, 9).over("ticker").struct.field("macdsignal"),
-        pl.col("open").ta.cdl2crows(
-            pl.col("high"), pl.col("low"), pl.col("close")
-        ).over("ticker").alias("cdl2crows"),
-        pl.col("close").ta.wclprice("high", "low").over("ticker").alias("wclprice"),
+        plta.ema(pl.col("close"), timeperiod=5).over("ticker").alias("ema5"),
+        plta.macd(pl.col("close"), fastperiod=12, slowperiod=26, signalperiod=9).over("ticker").struct.field("macd"),
+        plta.cdl2crows(pl.col("open"), pl.col("high"), pl.col("low"), pl.col("close")).over("ticker").alias("cdl2crows"),
+        plta.wclprice(pl.col("high"), pl.col("low"), pl.col("close")).over("ticker").alias("wclprice"),
     )
 
 def calculate_returns(df: pl.DataFrame, lags: list[int] | None = None, clip_quantile: float = 0.001,):

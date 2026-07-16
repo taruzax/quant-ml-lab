@@ -3,7 +3,7 @@ Each function returns a new dict (no mutation) with weights that sum to ~1.0.
 This is done intentionaly for debugging and logging
 """
 from __future__ import annotations
-from src.core.config import PipelineConfig
+from lab.core.config import PipelineConfig
 
 def apply_long_only(weights):
     """Safety function against negative weights"""

@@ -5,7 +5,7 @@ import polars as pl
 import pytest
 
 # pyrefly: ignore [missing-import]
-from src.core.config import PipelineConfig
+from lab.core.config import PipelineConfig
 
 
 @pytest.fixture

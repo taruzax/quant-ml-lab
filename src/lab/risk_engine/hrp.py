@@ -4,7 +4,7 @@ import polars as pl
 import scipy.cluster.hierarchy as sch
 from scipy.spatial.distance import squareform
 from pypfopt import HRPOpt
-from src.risk_engine.covariance import cov_to_corr, led_wo_shrinkage, denoise_cov
+from lab.risk_engine.covariance import cov_to_corr, led_wo_shrinkage, denoise_cov
 
 def hrp_custom(cov_matrix, tickers):
     """Custom polars native HRP"""

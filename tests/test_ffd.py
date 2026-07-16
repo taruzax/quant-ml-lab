@@ -3,9 +3,9 @@ import numpy as np
 import polars as pl
 from statsmodels.tsa.stattools import adfuller
 # pyrefly: ignore [missing-import]
-from src.data.ffd import get_weights_ffd, frac_diff_polars, find_min_d, run_adf_test, compute_memory_corr, find_min_d_grid
+from lab.data.ffd import get_weights_ffd, frac_diff_polars, find_min_d, run_adf_test, compute_memory_corr, find_min_d_grid
 # pyrefly: ignore [missing-import]
-import src.data.ffd as ffd_module
+import lab.data.ffd as ffd_module
 
 # ─────────────────────────────────────────────
 # 1. WEIGHT CORRECTNESS

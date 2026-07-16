@@ -3,16 +3,17 @@ import polars as pl
 import pytest
 import datetime
 # pyrefly: ignore [missing-import]
-from src.data.features import (
+from lab.data.features import (
     calculate_dollar_volume,
     calculate_returns,
     calculate_lagged_features,
     calculate_forward_targets,
     create_time_cycles,
     create_sector_dummies,
+    calculate_technical_indicators,
 )
 # pyrefly: ignore [missing-import]
-from src.core.schemas import return_col, lagged_col, target_col
+from lab.core.schemas import return_col, lagged_col, target_col
 
 def test_dollar_volume_columns_exist(single_ticker_df):
     df = single_ticker_df
@@ -88,3 +89,25 @@ def test_sector_dummies_missing_sector_raises():
     df = pl.DataFrame({"date": [pl.date(2024, 1, 1)], "ticker": ["A"], "year": [2024], "month": [1]})
     with pytest.raises(ValueError, match="sector"):
         create_sector_dummies(df)
+
+def test_technical_indicators_columns_exist(single_ticker_df):
+    """Verify that TA-Lib correctly attaches the new indicator columns."""
+    df = single_ticker_df
+    result = calculate_technical_indicators(df)
+    expected_columns = [
+        "ema5", 
+        "macd",  
+        "cdl2crows", 
+        "wclprice"
+    ]
+    
+    for col in expected_columns:
+        assert col in result.columns, f"Missing technical indicator column: {col}"
+        
+        # Verify that TA-Lib actually calculated data and didn't just return all nulls
+        # (It is completely normal for the first N rows to be null while indicators warm up)
+        valid_count = result[col].is_not_null().sum()
+        assert valid_count > 0, f"Column {col} was created but contains entirely null values!"
+
+    print("\n\n--- Sample Data (Last 5 rows) ---")
+    print(result.select(["date"] + expected_columns).tail(5))

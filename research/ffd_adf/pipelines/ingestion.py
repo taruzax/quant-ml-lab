@@ -2,8 +2,8 @@ import polars as pl
 import pathlib
 import yaml
 import datetime
-from ffd_adf.src.data.loader import load_market_data
-from ffd_adf.src.data.transform import apply_features
+from research.ffd_adf.data.loader import load_market_data
+from research.ffd_adf.data.transform import apply_features
 
 def load_tickers(config_path):
     path = pathlib.Path(config_path)

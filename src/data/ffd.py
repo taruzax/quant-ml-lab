@@ -1,8 +1,6 @@
-from IPython.core import logger
+
 from scipy.optimize import minimize_scalar
-from torchgen.api.cpp import return_type
 import polars as pl
-import polars_talib as plta
 from statsmodels.tsa.stattools import adfuller
 import numpy as np
 import warnings

@@ -31,7 +31,7 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Mypy type check
-        run: uv run mypy src/ --exclude "risk_engine/cla.py"
+        run: uv run mypy -p lab --exclude "risk_engine/cla.py"
 
       - name: Pytest with coverage
         run: uv run pytest --cov=src --cov-report=xml --cov-fail-under=80

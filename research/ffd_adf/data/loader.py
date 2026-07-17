@@ -1,20 +1,17 @@
 import time
+
 import pandas as pd
 import polars as pl
 import yfinance as yf
 
+
 def fetch_stock_data(tickers: list[str], interval: str, start: str, end: str | None = None) -> pd.DataFrame:
     """Fetches OHLCV data for given tickers."""
     stocks = yf.download(
-        tickers=tickers,
-        start=start,
-        end=end,
-        interval=interval,
-        auto_adjust=True,
-        progress=False,
-        group_by="column"
+        tickers=tickers, start=start, end=end, interval=interval, auto_adjust=True, progress=False, group_by="column"
     )
     return stocks
+
 
 def get_sector_industry_yf(symbol: str):
     """
@@ -27,6 +24,7 @@ def get_sector_industry_yf(symbol: str):
     except Exception:
         return None, None
 
+
 def fetch_sector_data(tickers: list[str]) -> pd.DataFrame:
     """Fetches sector and industry data for given tickers."""
     rows = []
@@ -38,24 +36,26 @@ def fetch_sector_data(tickers: list[str]) -> pd.DataFrame:
     sector_df = pd.DataFrame(rows)
     unique_syms = pd.Index(tickers, name="ticker").unique()
     sector_df = sector_df[sector_df["ticker"].isin(unique_syms)]
-    
+
     return sector_df
+
 
 def restructure_and_merge_data(stocks_df: pd.DataFrame, sector_df: pd.DataFrame) -> pd.DataFrame:
     """Restructures stock data to long format and merges with sector info."""
-    stocks_df.index.name = 'date'
+    stocks_df.index.name = "date"
 
     long_df = stocks_df.stack(level=1)
     long_df = long_df.rename(columns=str.lower)
     long_df = long_df.swaplevel().sort_index()
-    long_df.index.names = ['ticker', 'date']
+    long_df.index.names = ["ticker", "date"]
 
-    merged_df = long_df.join(sector_df.set_index('ticker'))
-    merged_df = merged_df.dropna(subset=['sector', 'industry'])
-    
+    merged_df = long_df.join(sector_df.set_index("ticker"))
+    merged_df = merged_df.dropna(subset=["sector", "industry"])
+
     return merged_df
 
-def load_market_data(tickers: list[str], interval:str, start: str, end: str | None = None) -> pl.DataFrame:
+
+def load_market_data(tickers: list[str], interval: str, start: str, end: str | None = None) -> pl.DataFrame:
     """
     Main ingestion orchestrator
     """

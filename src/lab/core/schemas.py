@@ -16,11 +16,14 @@ REQUIRED_DTYPES: dict[str, type[pl.DataType]] = {
 DOLLAR_VOL_COLUMNS: list[str] = ["dollar_vol", "dollar_vol_1m", "dollar_vol_rank"]
 TECHNICAL_COLUMNS: list[str] = ["ema5", "macd", "macdsignal", "cdl2crows", "wclprice"]
 
-def return_col(lag: int): 
+
+def return_col(lag: int):
     return f"return_{lag}d"
 
-def lagged_col(lag: int, lookback: int): 
+
+def lagged_col(lag: int, lookback: int):
     return f"return_{lag}d_lag{lookback}"
 
-def target_col(horizon: int): 
+
+def target_col(horizon: int):
     return f"target_{horizon}d"

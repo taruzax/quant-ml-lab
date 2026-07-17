@@ -16,20 +16,23 @@ def single_ticker_df() -> pl.DataFrame:
     dates = pl.date_range(
         start=pl.date(2024, 1, 1),
         end=pl.date(2024, 1, 1) + pl.duration(days=n - 1),
-        interval="1d", eager=True,
+        interval="1d",
+        eager=True,
     )
     close = np.exp(np.cumsum(np.random.normal(0, 0.01, n))) * 100
-    return pl.DataFrame({
-        "date": dates,
-        "ticker": ["TEST"] * n,
-        "open": close * 0.99,
-        "high": close * 1.02,
-        "low": close * 0.98,
-        "close": close,
-        "volume": np.random.uniform(1e6, 1e7, n),
-        "sector": ["Technology"] * n,
-        "industry": ["Software"] * n,
-    })
+    return pl.DataFrame(
+        {
+            "date": dates,
+            "ticker": ["TEST"] * n,
+            "open": close * 0.99,
+            "high": close * 1.02,
+            "low": close * 0.98,
+            "close": close,
+            "volume": np.random.uniform(1e6, 1e7, n),
+            "sector": ["Technology"] * n,
+            "industry": ["Software"] * n,
+        }
+    )
 
 
 @pytest.fixture
@@ -41,20 +44,23 @@ def multi_ticker_df(single_ticker_df) -> pl.DataFrame:
     dates = pl.date_range(
         start=pl.date(2024, 1, 1),
         end=pl.date(2024, 1, 1) + pl.duration(days=n - 1),
-        interval="1d", eager=True,
+        interval="1d",
+        eager=True,
     )
     close = np.exp(np.cumsum(np.random.normal(0, 0.015, n))) * 50
-    df_b = pl.DataFrame({
-        "date": dates,
-        "ticker": ["BBB"] * n,
-        "open": close * 0.99,
-        "high": close * 1.02,
-        "low": close * 0.98,
-        "close": close,
-        "volume": np.random.uniform(1e6, 1e7, n),
-        "sector": ["Healthcare"] * n,
-        "industry": ["Biotech"] * n,
-    })
+    df_b = pl.DataFrame(
+        {
+            "date": dates,
+            "ticker": ["BBB"] * n,
+            "open": close * 0.99,
+            "high": close * 1.02,
+            "low": close * 0.98,
+            "close": close,
+            "volume": np.random.uniform(1e6, 1e7, n),
+            "sector": ["Healthcare"] * n,
+            "industry": ["Biotech"] * n,
+        }
+    )
     return pl.concat([df_a, df_b])
 
 
@@ -64,9 +70,7 @@ def synthetic_returns() -> np.ndarray:
     np.random.seed(42)
     # Different volatilities to make HRP tests meaningful
     vols = [0.01, 0.02, 0.01, 0.015, 0.05]
-    returns = np.column_stack([
-        np.random.normal(0, vol, 500) for vol in vols
-    ])
+    returns = np.column_stack([np.random.normal(0, vol, 500) for vol in vols])
     return returns
 
 

@@ -1,18 +1,18 @@
 import polars as pl
 import pytest
-import numpy as np
+
+# pyrefly: ignore [missing-import]
+from lab.core.config import PipelineConfig
 
 # pyrefly: ignore [missing-import]
 from lab.data.validators import (
     DataValidationError,
-    validate_schema,
+    run_all_validations,
+    validate_monotonic_dates,
     validate_nulls,
     validate_prices,
-    validate_monotonic_dates,
-    run_all_validations,
+    validate_schema,
 )
-# pyrefly: ignore [missing-import]
-from lab.core.config import PipelineConfig
 
 
 def test_valid_data_passes(single_ticker_df):
@@ -48,10 +48,7 @@ def test_null_below_tolerance_passes(single_ticker_df):
 def test_negative_price_raises(single_ticker_df):
     df = single_ticker_df
     df = df.with_columns(
-        pl.when(pl.col("close") == pl.col("close").first())
-        .then(pl.lit(-1.0))
-        .otherwise(pl.col("close"))
-        .alias("close")
+        pl.when(pl.col("close") == pl.col("close").first()).then(pl.lit(-1.0)).otherwise(pl.col("close")).alias("close")
     )
     with pytest.raises(DataValidationError, match="close.*below"):
         validate_prices(df, min_price=0.0)
@@ -60,7 +57,7 @@ def test_negative_price_raises(single_ticker_df):
 def test_non_monotonic_dates_raises(single_ticker_df):
     df = single_ticker_df.head(10)
     # Swap two dates within the same ticker to break monotonicity
-    dates = df["date"].to_list() 
+    dates = df["date"].to_list()
     dates[2], dates[5] = dates[5], dates[2]
     df = df.with_columns(pl.Series("date", dates))
     with pytest.raises(DataValidationError, match="Non-monotonic"):

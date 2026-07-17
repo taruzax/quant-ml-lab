@@ -1,19 +1,23 @@
+import datetime
+
 import numpy as np
 import polars as pl
 import pytest
-import datetime
+
+# pyrefly: ignore [missing-import]
+from lab.core.schemas import lagged_col, return_col, target_col
+
 # pyrefly: ignore [missing-import]
 from lab.data.features import (
     calculate_dollar_volume,
-    calculate_returns,
-    calculate_lagged_features,
     calculate_forward_targets,
-    create_time_cycles,
-    create_sector_dummies,
+    calculate_lagged_features,
+    calculate_returns,
     calculate_technical_indicators,
+    create_sector_dummies,
+    create_time_cycles,
 )
-# pyrefly: ignore [missing-import]
-from lab.core.schemas import return_col, lagged_col, target_col
+
 
 def test_dollar_volume_columns_exist(single_ticker_df):
     df = single_ticker_df
@@ -24,11 +28,13 @@ def test_dollar_volume_columns_exist(single_ticker_df):
 
 def test_returns_correct_values():
     """Manually compute 1-day return for known prices and verify match."""
-    df = pl.DataFrame({
-        "date": pl.date_range(pl.date(2024, 1, 1), pl.date(2024, 1, 3), interval="1d", eager=True),
-        "ticker": ["T"] * 3,
-        "close": [100.0, 110.0, 105.0],
-    })
+    df = pl.DataFrame(
+        {
+            "date": pl.date_range(pl.date(2024, 1, 1), pl.date(2024, 1, 3), interval="1d", eager=True),
+            "ticker": ["T"] * 3,
+            "close": [100.0, 110.0, 105.0],
+        }
+    )
     result = calculate_returns(df, lags=[1], clip_quantile=0.0)
     # 1-day return: 110/100 - 1 = 0.10, 105/110 - 1 = -0.0454...
     returns = result[return_col(1)].to_list()
@@ -74,15 +80,15 @@ def test_forward_targets_shift_correctly(single_ticker_df):
 
 
 def test_time_features_extraction():
-    df = pl.DataFrame({
-        "date": [datetime.date(2024, 3, 15), datetime.date(2024, 7, 4)],
-        "ticker": ["A", "A"],
-    })
+    df = pl.DataFrame(
+        {
+            "date": [datetime.date(2024, 3, 15), datetime.date(2024, 7, 4)],
+            "ticker": ["A", "A"],
+        }
+    )
     result = create_time_cycles(df)
     assert result["year_scaled"].to_list() == [4, 4]
     assert np.allclose(result["month_sin"].to_list(), [1.0, -0.5], atol=1e-5)
-
-
 
 
 def test_sector_dummies_missing_sector_raises():
@@ -90,20 +96,16 @@ def test_sector_dummies_missing_sector_raises():
     with pytest.raises(ValueError, match="sector"):
         create_sector_dummies(df)
 
+
 def test_technical_indicators_columns_exist(single_ticker_df):
     """Verify that TA-Lib correctly attaches the new indicator columns."""
     df = single_ticker_df
     result = calculate_technical_indicators(df)
-    expected_columns = [
-        "ema5", 
-        "macd",  
-        "cdl2crows", 
-        "wclprice"
-    ]
-    
+    expected_columns = ["ema5", "macd", "cdl2crows", "wclprice"]
+
     for col in expected_columns:
         assert col in result.columns, f"Missing technical indicator column: {col}"
-        
+
         # Verify that TA-Lib actually calculated data and didn't just return all nulls
         # (It is completely normal for the first N rows to be null while indicators warm up)
         valid_count = result[col].is_not_null().sum()

@@ -1,14 +1,16 @@
 """Tests for the Tensor Factory — shape contracts and NaN assertions."""
+
 import numpy as np
 import polars as pl
 import pytest
 import torch
+
+# pyrefly: ignore [missing-import]
 # pyrefly: ignore [missing-import]
 from lab.data.tensor_loader import TimeSeriesDataset, create_dataloaders
+
 # pyrefly: ignore [missing-import]
 from lab.data.validators import DataValidationError
-# pyrefly: ignore [missing-import]
-from lab.core.config import PipelineConfig
 
 
 def _make_tensor_df(n: int = 50, n_tickers: int = 1) -> pl.DataFrame:
@@ -20,16 +22,21 @@ def _make_tensor_df(n: int = 50, n_tickers: int = 1) -> pl.DataFrame:
         dates = pl.date_range(
             start=pl.date(2024, 1, 1),
             end=pl.date(2024, 1, 1) + pl.duration(days=n - 1),
-            interval="1d", eager=True,
+            interval="1d",
+            eager=True,
         )
-        frames.append(pl.DataFrame({
-            "date": dates,
-            "ticker": [ticker] * n,
-            "f1": np.random.randn(n).astype(np.float64),
-            "f2": np.random.randn(n).astype(np.float64),
-            "f3": np.random.randn(n).astype(np.float64),
-            "target_1d": np.random.randn(n).astype(np.float64),
-        }))
+        frames.append(
+            pl.DataFrame(
+                {
+                    "date": dates,
+                    "ticker": [ticker] * n,
+                    "f1": np.random.randn(n).astype(np.float64),
+                    "f2": np.random.randn(n).astype(np.float64),
+                    "f3": np.random.randn(n).astype(np.float64),
+                    "target_1d": np.random.randn(n).astype(np.float64),
+                }
+            )
+        )
     return pl.concat(frames)
 
 
@@ -81,8 +88,8 @@ def test_batch_shape(pipeline_config):
     train_loader, _ = create_dataloaders(df, ["f1", "f2", "f3"], ["target_1d"], pipeline_config)
     batch_features, batch_targets = next(iter(train_loader))
     assert batch_features.shape[1] == 10  # sequence_len
-    assert batch_features.shape[2] == 3   # n_features
-    assert batch_targets.shape[1] == 1    # n_targets
+    assert batch_features.shape[2] == 3  # n_features
+    assert batch_targets.shape[1] == 1  # n_targets
 
 
 def test_target_is_last_timestep():
@@ -94,7 +101,6 @@ def test_target_is_last_timestep():
     # The target should be the target_1d value at row index seq_len-1 (0-indexed)
     expected = df["target_1d"][seq_len - 1]
     assert abs(float(target[0]) - expected) < 1e-5
-
 
 
 def test_multiple_missing_columns_reported():
@@ -145,10 +151,12 @@ def test_values_match_naive_implementation():
         tgt_np = group_df.select(target_cols).to_numpy().astype(np.float32)
         n = group_df.height
         for i in range(n - seq_len):
-            naive_windows.append((
-                torch.from_numpy(feat_np[i : i + seq_len].copy()),
-                torch.from_numpy(tgt_np[i + seq_len - 1].copy()),
-            ))
+            naive_windows.append(
+                (
+                    torch.from_numpy(feat_np[i : i + seq_len].copy()),
+                    torch.from_numpy(tgt_np[i + seq_len - 1].copy()),
+                )
+            )
 
     assert len(ds) == len(naive_windows), f"Length mismatch: {len(ds)} vs {len(naive_windows)}"
 
@@ -191,10 +199,12 @@ def test_memory_reduction():
         tgt_np = group_df.select(target_cols).to_numpy().astype(np.float32)
         n = group_df.height
         for i in range(n - seq_len):
-            naive_windows.append((
-                feat_np[i : i + seq_len].copy(),
-                tgt_np[i + seq_len - 1].copy(),
-            ))
+            naive_windows.append(
+                (
+                    feat_np[i : i + seq_len].copy(),
+                    tgt_np[i + seq_len - 1].copy(),
+                )
+            )
     _, peak_naive = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
@@ -203,6 +213,5 @@ def test_memory_reduction():
     print(f"  Ratio:          {peak_naive / max(peak_new, 1):.2f}x")
 
     assert peak_new < peak_naive, (
-        f"Index-map ({peak_new / 1024:.1f} KB) should use less memory "
-        f"than naive ({peak_naive / 1024:.1f} KB)"
+        f"Index-map ({peak_new / 1024:.1f} KB) should use less memory than naive ({peak_naive / 1024:.1f} KB)"
     )

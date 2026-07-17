@@ -1,10 +1,12 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pathlib import Path
 from functools import lru_cache
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class PipelineConfig(BaseSettings):
     # Read from .env
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra='ignore')
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Data paths
     raw_data_dir: Path = Path("data/raw")
@@ -37,6 +39,7 @@ class PipelineConfig(BaseSettings):
     lookback_periods: list[int] = [1, 2, 3, 4, 5]
     target_horizons: list[int] = [1, 5, 10, 21]
 
-@lru_cache()
+
+@lru_cache
 def get_config():
     return PipelineConfig()

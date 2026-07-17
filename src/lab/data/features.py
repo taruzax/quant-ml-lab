@@ -1,28 +1,22 @@
+import numpy as np
 import polars as pl
 import polars_talib as plta
-import numpy as np
-import warnings
 
 # pyrefly: ignore [missing-import]
 from lab.core.config import PipelineConfig
+
 # pyrefly: ignore [missing-import]
-from lab.core.schemas import return_col, lagged_col, target_col
+from lab.core.schemas import lagged_col, return_col, target_col
+
 
 def calculate_dollar_volume(df: pl.DataFrame) -> pl.DataFrame:
     """Migrated from transform.py"""
     return (
-        df.with_columns(dollar_vol = pl.col("close") * pl.col("volume"))
-        .with_columns(
-            dollar_vol_1m = pl.col("dollar_vol")
-            .rolling_mean(window_size=21)
-            .over("ticker")
-        )
-        .with_columns(
-            dollar_vol_rank = pl.col("dollar_vol_1m")
-            .rank(descending=True)
-            .over("date")
-        )
+        df.with_columns(dollar_vol=pl.col("close") * pl.col("volume"))
+        .with_columns(dollar_vol_1m=pl.col("dollar_vol").rolling_mean(window_size=21).over("ticker"))
+        .with_columns(dollar_vol_rank=pl.col("dollar_vol_1m").rank(descending=True).over("date"))
     )
+
 
 def calculate_technical_indicators(df: pl.DataFrame) -> pl.DataFrame:
     """Migrated from transform.py"""
@@ -33,7 +27,12 @@ def calculate_technical_indicators(df: pl.DataFrame) -> pl.DataFrame:
         plta.wclprice(pl.col("high"), pl.col("low"), pl.col("close")).over("ticker").alias("wclprice"),
     )
 
-def calculate_returns(df: pl.DataFrame, lags: list[int] | None = None, clip_quantile: float = 0.001,):
+
+def calculate_returns(
+    df: pl.DataFrame,
+    lags: list[int] | None = None,
+    clip_quantile: float = 0.001,
+):
     """
     For each lag in lags, computes:
       raw_return = close / close.shift(lag) - 1
@@ -76,6 +75,7 @@ def calculate_returns(df: pl.DataFrame, lags: list[int] | None = None, clip_quan
 
     # return df.with_columns(shift_exprs)
 
+
 def calculate_lagged_features(
     df: pl.DataFrame,
     return_lags: list[int] | None = None,
@@ -97,11 +97,10 @@ def calculate_lagged_features(
         for lag in return_lags:
             source_col = return_col(lag)
             alias_name = lagged_col(lag, t)
-            shift_exprs.append(
-                pl.col(source_col).shift(t * lag).over("ticker").alias(alias_name)
-            )
+            shift_exprs.append(pl.col(source_col).shift(t * lag).over("ticker").alias(alias_name))
 
     return df.with_columns(shift_exprs)
+
 
 def calculate_forward_targets(
     df: pl.DataFrame,
@@ -118,12 +117,9 @@ def calculate_forward_targets(
 
     shift_exprs = []
     for h in horizons:
-        shift_exprs.append(
-            pl.col(return_col(h)).shift(-h).over("ticker").alias(target_col(h))
-        )
+        shift_exprs.append(pl.col(return_col(h)).shift(-h).over("ticker").alias(target_col(h)))
 
     return df.with_columns(shift_exprs)
-
 
 
 def create_sector_dummies(df: pl.DataFrame) -> pl.DataFrame:
@@ -132,13 +128,10 @@ def create_sector_dummies(df: pl.DataFrame) -> pl.DataFrame:
     Migrated from transform.py lines
     """
     if "sector" not in df.columns:
-        raise ValueError(
-            "Column 'sector' not found. Cannot create sector dummies. "
-            f"Available columns: {df.columns}"
-        )
+        raise ValueError(f"Column 'sector' not found. Cannot create sector dummies. Available columns: {df.columns}")
 
     dummy_cols = []
-    for col in [ "sector"]:
+    for col in ["sector"]:
         if col in df.columns:
             dummy_cols.append(col)
 
@@ -148,6 +141,7 @@ def create_sector_dummies(df: pl.DataFrame) -> pl.DataFrame:
         df = df.drop("industry")
 
     return df
+
 
 # def create_time_features(df: pl.DataFrame) -> pl.DataFrame:
 #     """Extract year and month from the date column.
@@ -159,21 +153,20 @@ def create_sector_dummies(df: pl.DataFrame) -> pl.DataFrame:
 #         month=pl.col("date").dt.month(),
 #     )
 
+
 def create_time_cycles(df: pl.DataFrame) -> pl.DataFrame:
-    """Uses cyclical encoding for time instead of one-hot encode
-    """
+    """Uses cyclical encoding for time instead of one-hot encode"""
     df = df.with_columns(
-        year_scaled = (pl.col("date").dt.year() - 2020),
-        month_sin = (2 * np.pi * pl.col("date").dt.month() / 12).sin(),
-        month_cos = (2 * np.pi * pl.col("date").dt.month() / 12).cos(),
-        weekday_sin = (2 * np.pi * pl.col("date").dt.weekday() / 7).sin(),
-        weekday_cos = (2 * np.pi * pl.col("date").dt.weekday() / 7).cos(),
+        year_scaled=(pl.col("date").dt.year() - 2020),
+        month_sin=(2 * np.pi * pl.col("date").dt.month() / 12).sin(),
+        month_cos=(2 * np.pi * pl.col("date").dt.month() / 12).cos(),
+        weekday_sin=(2 * np.pi * pl.col("date").dt.weekday() / 7).sin(),
+        weekday_cos=(2 * np.pi * pl.col("date").dt.weekday() / 7).cos(),
         # hour_sin = (2 * np.pi * pl.col("date").dt.hour() / 24).sin(),
         # hour_cos = (2 * np.pi * pl.col("date").dt.hour() / 24).cos()
     )
 
     return df
-
 
 
 def apply_all_features(df: pl.DataFrame, config: PipelineConfig) -> pl.DataFrame:

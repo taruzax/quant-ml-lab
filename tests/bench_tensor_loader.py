@@ -1,16 +1,20 @@
+import os
+import sys
 import time
 import tracemalloc
+
 import numpy as np
 import polars as pl
 import torch
 
-import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # pyrefly: ignore [missing-import]
 from lab.data.tensor_loader import TimeSeriesDataset
+
 # pyrefly: ignore [missing-import]
 # from archive.archived_tensor_loader import TimeSeriesDataset
+
 
 def make_bench_df(n_tickers: int = 17, n_days: int = 2500, n_features: int = 60) -> pl.DataFrame:
     """Simulate production-scale data: 17 tickers × 2500 days × 60 features."""
@@ -20,7 +24,8 @@ def make_bench_df(n_tickers: int = 17, n_days: int = 2500, n_features: int = 60)
         dates = pl.date_range(
             start=pl.date(2015, 1, 1),
             end=pl.date(2015, 1, 1) + pl.duration(days=n_days - 1),
-            interval="1d", eager=True,
+            interval="1d",
+            eager=True,
         )
         data = {"date": dates, "ticker": [f"TICK_{i}"] * n_days}
         for f in range(n_features):
@@ -34,17 +39,16 @@ def run_benchmark():
     print("=" * 60)
     print("TENSOR LOADER BENCHMARK SUMMARY")
     print("=" * 60)
-    
+
     feature_cols = [f"f{i}" for i in range(60)]
     target_cols = ["target_1d"]
     seq_len = 60
     n_tickers = 100
     n_days = 2500
     n_features = 60
-    
+
     t0 = time.perf_counter()
     df = make_bench_df(n_tickers, n_days, n_features)
-
 
     tracemalloc.start()
     t0 = time.perf_counter()
@@ -60,12 +64,10 @@ def run_benchmark():
     # print(f"    Peak memory:       {peak_mem / 1024 / 1024:.1f} MB")
     # print(f"    Current memory:    {current_mem / 1024 / 1024:.1f} MB")
 
-
     t0 = time.perf_counter()
     for i in range(min(1000, len(ds))):
         feat, tgt = ds[i]
     iter_time = time.perf_counter() - t0
-
 
     loader = torch.utils.data.DataLoader(ds, batch_size=32, shuffle=False)
     t0 = time.perf_counter()
@@ -124,4 +126,3 @@ DataLoader:    0.677s
 ============================================================
 
 """
-

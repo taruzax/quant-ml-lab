@@ -75,5 +75,6 @@ exclude = ["archive/", "src/risk_engine/cla\\.py", "research/"]
 [dependency-groups]
 dev = [
     "mypy>=2.3.0",
+    "pytest-cov>=7.1.0",
     "types-pyyaml>=6.0.12.20260518",
 ]

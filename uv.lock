@@ -4338,6 +4338,7 @@ dev = [
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "pytest-cov" },
     { name = "types-pyyaml" },
 ]
 
@@ -4378,6 +4379,7 @@ provides-extras = ["dev"]
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=2.3.0" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20260518" },
 ]
 

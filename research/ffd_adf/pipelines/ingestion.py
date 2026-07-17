@@ -1,6 +1,6 @@
 import polars as pl
 import pathlib
-import yaml
+import yaml # type: ignore
 import datetime
 from research.ffd_adf.data.loader import load_market_data
 from research.ffd_adf.data.transform import apply_features

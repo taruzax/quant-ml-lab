@@ -15,3 +15,4 @@ log.md
 .DS_Store
 .pytest_cache
 .ruff_cache
+*_cache

@@ -4,7 +4,7 @@ REQUIRED_OHLCV_COLUMNS: list[str] = ["date", "ticker", "open", "high", "low", "c
 PRICE_COLUMNS: list[str] = ["open", "high", "low", "close"]
 CATEGORICAL_COLUMNS: list[str] = ["sector", "industry"]
 
-REQUIRED_DTYPES: dict[str, pl.DataType] = {
+REQUIRED_DTYPES: dict[str, type[pl.DataType]] = {
     "date": pl.Date,
     "ticker": pl.Utf8,
     "open": pl.Float64,

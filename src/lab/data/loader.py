@@ -16,7 +16,7 @@ def load_tickers(config_path):
     return tickers
         
 
-def fetch_stock_data(tickers: list[str], interval: str, start: str, end: str = None) -> pd.DataFrame:
+def fetch_stock_data(tickers: list[str], interval: str, start: str, end: str | None = None) -> pd.DataFrame:
     """Fetches OHLCV data for given tickers.
     
     Migrated from: ffd_adf/src/data/loader.py"""
@@ -74,7 +74,7 @@ def restructure_and_merge_data(stocks_df: pd.DataFrame, sector_df: pd.DataFrame)
     
     return merged_df
 
-def load_market_data(tickers: list[str], interval:str, start: str, end: str = None) -> pl.DataFrame:
+def load_market_data(tickers: list[str], interval:str, start: str, end: str| None = None) -> pl.DataFrame:
     """
     Main ingestion orchestrator
     Migrated from: ffd_adf/src/data/loader.py

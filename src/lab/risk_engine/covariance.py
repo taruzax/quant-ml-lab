@@ -10,7 +10,7 @@ def led_wo_shrinkage(returns):
     return lw.covariance_, lw.shrinkage_
 
 
-def denoise_cov(cov, n_observarions, method):
+def denoise_cov(cov, n_observarions, method: str | None = None):
     """Denoise a covariance matrix using Marchenko-Pastur random matrix theory"""
 
     n_assets = cov.shape[0]

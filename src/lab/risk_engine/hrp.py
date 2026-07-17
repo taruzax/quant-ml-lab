@@ -17,7 +17,7 @@ def hrp_pypfort(cov_matrix, tickers):
             - list of assets names
     """
     denoise_cov_df = pd.DataFrame(cov_matrix,index=tickers, columns=tickers )
-    hrp = HRPOpt(returns=None, cov_matrix=denoised_cov_df)
+    hrp = HRPOpt(returns=None, cov_matrix=denoise_cov_df)
     hrp.optimize()
     return dict(hrp.clean_weights())
 

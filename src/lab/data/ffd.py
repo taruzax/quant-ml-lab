@@ -107,10 +107,10 @@ def find_min_d(df_ticker, col_name: str = 'close', max_d: float = 1.0, threshold
     return find_min_d_grid(df_ticker, col_name, max_d, threshold, min_d, significance)
 
 
-def find_global_d(df: pl.DataFrame, col_name: str = 'log_close', reference_ticker: str = None, coverage_threshold: float = 0.8, max_d: float = 1.0, threshold: float = 0.01, min_d: float = 0.1, significance: float = 0.05) -> float:
+def find_global_d(df: pl.DataFrame, col_name: str = 'log_close', reference_ticker: str | None = None, coverage_threshold: float = 0.8, max_d: float = 1.0, threshold: float = 0.01, min_d: float = 0.1, significance: float = 0.05) -> float:
     if reference_ticker is not None:
         df_ticker = df.filter(pl.col("ticker") == reference_ticker)
-        return find_min_d(df_ticker, col_name=col_name, max_d=max_d, min_d=min_d, threshold=threshold, significance=significance)
+        return float(find_min_d(df_ticker, col_name=col_name, max_d=max_d, min_d=min_d, threshold=threshold, significance=significance))
         
     tickers = df.get_column("ticker").unique().to_list()
     optimal_ds = []
@@ -128,5 +128,5 @@ def find_global_d(df: pl.DataFrame, col_name: str = 'log_close', reference_ticke
     if idx >= len(optimal_ds):
         idx = len(optimal_ds) - 1
         
-    return optimal_ds[idx]
+    return float(optimal_ds[idx])
 

@@ -129,9 +129,9 @@ def test_getitem_returns_views():
     block_end = block_start + block.untyped_storage().nbytes()
 
     feat_ptr = features.untyped_storage().data_ptr()
-    assert block_start <= feat_ptr < block_end, (
-        f"features data_ptr {feat_ptr} not within block range [{block_start}, {block_end})"
-    )
+    assert (
+        block_start <= feat_ptr < block_end
+    ), f"features data_ptr {feat_ptr} not within block range [{block_start}, {block_end})"
 
 
 def test_values_match_naive_implementation():
@@ -212,6 +212,6 @@ def test_memory_reduction():
     print(f"  Naive peak:     {peak_naive / 1024:.1f} KB")
     print(f"  Ratio:          {peak_naive / max(peak_new, 1):.2f}x")
 
-    assert peak_new < peak_naive, (
-        f"Index-map ({peak_new / 1024:.1f} KB) should use less memory than naive ({peak_naive / 1024:.1f} KB)"
-    )
+    assert (
+        peak_new < peak_naive
+    ), f"Index-map ({peak_new / 1024:.1f} KB) should use less memory than naive ({peak_naive / 1024:.1f} KB)"

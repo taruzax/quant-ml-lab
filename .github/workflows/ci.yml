@@ -1,0 +1,44 @@
+name: quant-ml-lab CI
+
+on:
+  push:
+    paths:
+      - "**/*"
+  pull_request:
+    paths:
+      - "**/*"
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Mypy type check
+        run: uv run mypy src/ --exclude "risk_engine/cla.py"
+
+      - name: Pytest with coverage
+        run: uv run pytest --cov=src --cov-report=xml --cov-fail-under=80
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml

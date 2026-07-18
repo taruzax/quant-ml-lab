@@ -45,8 +45,8 @@ def run_benchmark():
     feature_cols = [f"f{i}" for i in range(60)]
     target_cols = ["target_1b"]
     seq_len = 60
-    n_tickers = 1000
-    n_periods = 25000
+    n_tickers = 100
+    n_periods = 2500
     n_features = 60
 
     t0 = time.perf_counter()

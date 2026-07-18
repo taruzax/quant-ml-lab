@@ -3,18 +3,18 @@ import polars as pl
 import polars_talib as plta
 
 # pyrefly: ignore [missing-import]
-from lab.core.config import PipelineConfig
+from lab.core.config import PipelineConfig, Timeframe
 
 # pyrefly: ignore [missing-import]
 from lab.core.schemas import lagged_col, return_col, target_col
 
 
-def calculate_dollar_volume(df: pl.DataFrame) -> pl.DataFrame:
+def calculate_dollar_volume(df: pl.DataFrame, config: PipelineConfig) -> pl.DataFrame:
     """Migrated from transform.py"""
     return (
         df.with_columns(dollar_vol=pl.col("close") * pl.col("volume"))
-        .with_columns(dollar_vol_1m=pl.col("dollar_vol").rolling_mean(window_size=21).over("ticker"))
-        .with_columns(dollar_vol_rank=pl.col("dollar_vol_1m").rank(descending=True).over("date"))
+        .with_columns(dollar_vol_1m=pl.col("dollar_vol").rolling_mean(window_size=config.rolling_month_bars).over("ticker"))
+        .with_columns(dollar_vol_rank=pl.col("dollar_vol_1m").rank(descending=True).over("timestamp"))
     )
 
 
@@ -154,28 +154,32 @@ def create_sector_dummies(df: pl.DataFrame) -> pl.DataFrame:
 #     )
 
 
-def create_time_cycles(df: pl.DataFrame) -> pl.DataFrame:
+def create_time_cycles(df: pl.DataFrame, config: PipelineConfig) -> pl.DataFrame:
     """Uses cyclical encoding for time instead of one-hot encode"""
     df = df.with_columns(
-        year_scaled=(pl.col("date").dt.year() - 2020),
-        month_sin=(2 * np.pi * pl.col("date").dt.month() / 12).sin(),
-        month_cos=(2 * np.pi * pl.col("date").dt.month() / 12).cos(),
-        weekday_sin=(2 * np.pi * pl.col("date").dt.weekday() / 7).sin(),
-        weekday_cos=(2 * np.pi * pl.col("date").dt.weekday() / 7).cos(),
-        # hour_sin = (2 * np.pi * pl.col("date").dt.hour() / 24).sin(),
-        # hour_cos = (2 * np.pi * pl.col("date").dt.hour() / 24).cos()
+        year_scaled=(pl.col("timestamp").dt.year() - 2020),
+        month_sin=(2 * np.pi * pl.col("timestamp").dt.month() / 12).sin(),
+        month_cos=(2 * np.pi * pl.col("timestamp").dt.month() / 12).cos(),
+        weekday_sin=(2 * np.pi * pl.col("timestamp").dt.weekday() / 7).sin(),
+        weekday_cos=(2 * np.pi * pl.col("timestamp").dt.weekday() / 7).cos(),
     )
+
+    if config.timeframe == Timeframe.H1:
+        df = df.with_columns(
+            hour_sin=(2 * np.pi * pl.col("timestamp").dt.hour() / 24).sin(),
+            hour_cos=(2 * np.pi * pl.col("timestamp").dt.hour() / 24).cos(),
+        )
 
     return df
 
 
 def apply_all_features(df: pl.DataFrame, config: PipelineConfig) -> pl.DataFrame:
     """Applies all feature transformations in sequence. Does NOT apply FFD — that's separate."""
-    df = calculate_dollar_volume(df)
+    df = calculate_dollar_volume(df, config)
     df = calculate_technical_indicators(df)
     df = calculate_returns(df, config.return_lags, config.clip_quantile)
     df = calculate_lagged_features(df, config.target_horizons, config.lookback_periods)
     df = calculate_forward_targets(df, config.target_horizons)
-    df = create_time_cycles(df)
+    df = create_time_cycles(df, config)
     df = create_sector_dummies(df)
     return df

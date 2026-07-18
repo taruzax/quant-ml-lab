@@ -60,12 +60,12 @@ def fetch_sector_data(tickers: list[str]) -> pd.DataFrame:
 def restructure_and_merge_data(stocks_df: pd.DataFrame, sector_df: pd.DataFrame) -> pd.DataFrame:
     """Restructures stock data to long format and merges with sector info.
     Migrated from: ffd_adf/src/data/loader.py"""
-    stocks_df.index.name = "date"
+    stocks_df.index.name = "timestamp"
 
     long_df = stocks_df.stack(level=1)
     long_df = long_df.rename(columns=str.lower)
     long_df = long_df.swaplevel().sort_index()
-    long_df.index.names = ["ticker", "date"]
+    long_df.index.names = ["ticker", "timestamp"]
 
     merged_df = long_df.join(sector_df.set_index("ticker"))
     merged_df = merged_df.dropna(subset=["sector", "industry"])
@@ -84,7 +84,10 @@ def load_market_data(tickers: list[str], interval: str, start: str, end: str | N
     merged_pd = restructure_and_merge_data(stocks_df, sector_df)
 
     print("Data successfully loaded.")
-    return pl.DataFrame(merged_pd.reset_index()).sort(["ticker", "date"])
+    df_out = pl.DataFrame(merged_pd.reset_index())
+    if "timestamp" in df_out.columns and df_out["timestamp"].dtype != pl.Datetime:
+        df_out = df_out.with_columns(pl.col("timestamp").cast(pl.Datetime))
+    return df_out.sort(["ticker", "timestamp"])
 
 
 def save_model_data(df: pl.DataFrame, directory: str = "data/raw", filename: str = "model_data"):

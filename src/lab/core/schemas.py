@@ -1,11 +1,11 @@
 import polars as pl
 
-REQUIRED_OHLCV_COLUMNS: list[str] = ["date", "ticker", "open", "high", "low", "close", "volume"]
+REQUIRED_OHLCV_COLUMNS: list[str] = ["timestamp", "ticker", "open", "high", "low", "close", "volume"]
 PRICE_COLUMNS: list[str] = ["open", "high", "low", "close"]
 CATEGORICAL_COLUMNS: list[str] = ["sector", "industry"]
 
 REQUIRED_DTYPES: dict[str, type[pl.DataType]] = {
-    "date": pl.Date,
+    "timestamp": pl.Datetime,
     "ticker": pl.Utf8,
     "open": pl.Float64,
     "high": pl.Float64,
@@ -13,17 +13,19 @@ REQUIRED_DTYPES: dict[str, type[pl.DataType]] = {
     "close": pl.Float64,
     "volume": pl.Float64,
 }
+
+
 DOLLAR_VOL_COLUMNS: list[str] = ["dollar_vol", "dollar_vol_1m", "dollar_vol_rank"]
 TECHNICAL_COLUMNS: list[str] = ["ema5", "macd", "macdsignal", "cdl2crows", "wclprice"]
 
 
-def return_col(lag: int):
-    return f"return_{lag}d"
+def return_col(lag: int) -> str:
+    return f"return_{lag}b"
 
 
-def lagged_col(lag: int, lookback: int):
-    return f"return_{lag}d_lag{lookback}"
+def lagged_col(lag: int, lookback: int) -> str:
+    return f"return_{lag}b_lag{lookback}"
 
 
-def target_col(horizon: int):
-    return f"target_{horizon}d"
+def target_col(horizon: int) -> str:
+    return f"target_{horizon}b"

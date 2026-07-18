@@ -1,5 +1,7 @@
 """Tests for the Tensor Factory — shape contracts and NaN assertions."""
 
+from datetime import datetime
+
 import numpy as np
 import polars as pl
 import pytest
@@ -19,21 +21,22 @@ def _make_tensor_df(n: int = 50, n_tickers: int = 1) -> pl.DataFrame:
     frames = []
     for i in range(n_tickers):
         ticker = f"T{i}"
-        dates = pl.date_range(
-            start=pl.date(2024, 1, 1),
-            end=pl.date(2024, 1, 1) + pl.duration(days=n - 1),
-            interval="1d",
+        dates = pl.datetime_range(
+            start=datetime(2024, 1, 1),
+            end=datetime(2024, 1, 1) + pl.duration(hours=n - 1),
+            interval="1h",
+            time_unit="ns",
             eager=True,
         )
         frames.append(
             pl.DataFrame(
                 {
-                    "date": dates,
+                    "timestamp": dates,
                     "ticker": [ticker] * n,
                     "f1": np.random.randn(n).astype(np.float64),
                     "f2": np.random.randn(n).astype(np.float64),
                     "f3": np.random.randn(n).astype(np.float64),
-                    "target_1d": np.random.randn(n).astype(np.float64),
+                    "target_1b": np.random.randn(n).astype(np.float64),
                 }
             )
         )
@@ -42,7 +45,7 @@ def _make_tensor_df(n: int = 50, n_tickers: int = 1) -> pl.DataFrame:
 
 def test_dataset_output_shape():
     df = _make_tensor_df(n=50)
-    ds = TimeSeriesDataset(df, ["f1", "f2", "f3"], ["target_1d"], sequence_len=10)
+    ds = TimeSeriesDataset(df, ["f1", "f2", "f3"], ["target_1b"], sequence_len=10)
     features, target = ds[0]
     assert features.shape == (10, 3)
     assert target.shape == (1,)
@@ -50,7 +53,7 @@ def test_dataset_output_shape():
 
 def test_dataset_no_nans():
     df = _make_tensor_df(n=100)
-    ds = TimeSeriesDataset(df, ["f1", "f2", "f3"], ["target_1d"], sequence_len=10)
+    ds = TimeSeriesDataset(df, ["f1", "f2", "f3"], ["target_1b"], sequence_len=10)
     for i in range(len(ds)):
         features, target = ds[i]
         assert not torch.isnan(features).any(), f"NaN in features at index {i}"
@@ -61,31 +64,31 @@ def test_dataset_nan_input_raises():
     df = _make_tensor_df(n=50)
     df = df.with_columns(pl.when(pl.lit(True)).then(None).otherwise(pl.col("f1")).alias("f1"))
     with pytest.raises(DataValidationError, match="nulls"):
-        TimeSeriesDataset(df, ["f1", "f2", "f3"], ["target_1d"], sequence_len=10)
+        TimeSeriesDataset(df, ["f1", "f2", "f3"], ["target_1b"], sequence_len=10)
 
 
 def test_short_ticker_skipped():
     df = _make_tensor_df(n=5)  # Only 5 rows, seq_len=10 → should skip
-    ds = TimeSeriesDataset(df, ["f1", "f2", "f3"], ["target_1d"], sequence_len=10)
+    ds = TimeSeriesDataset(df, ["f1", "f2", "f3"], ["target_1b"], sequence_len=10)
     assert len(ds) == 0
 
 
 def test_time_based_split(pipeline_config):
     df = _make_tensor_df(n=100)
     pipeline_config.train_cutoff_date = "2024-03-10"
-    train_loader, val_loader = create_dataloaders(df, ["f1", "f2", "f3"], ["target_1d"], pipeline_config)
+    train_loader, val_loader = create_dataloaders(df, ["f1", "f2", "f3"], ["target_1b"], pipeline_config)
     assert train_loader is not None
     # Verify train dates are before val dates
-    train_dates = df.filter(pl.col("date").cast(pl.Utf8) <= "2024-03-10")["date"].max()
+    train_dates = df.filter(pl.col("timestamp").cast(pl.Utf8) <= "2024-03-10")["timestamp"].max()
     if val_loader is not None:
-        val_dates = df.filter(pl.col("date").cast(pl.Utf8) > "2024-03-10")["date"].min()
+        val_dates = df.filter(pl.col("timestamp").cast(pl.Utf8) > "2024-03-10")["timestamp"].min()
         assert train_dates <= val_dates
 
 
 def test_batch_shape(pipeline_config):
     df = _make_tensor_df(n=100)
     pipeline_config.batch_size = 8
-    train_loader, _ = create_dataloaders(df, ["f1", "f2", "f3"], ["target_1d"], pipeline_config)
+    train_loader, _ = create_dataloaders(df, ["f1", "f2", "f3"], ["target_1b"], pipeline_config)
     batch_features, batch_targets = next(iter(train_loader))
     assert batch_features.shape[1] == 10  # sequence_len
     assert batch_features.shape[2] == 3  # n_features
@@ -96,10 +99,10 @@ def test_target_is_last_timestep():
     """Verify that the target corresponds to the last row in the window."""
     df = _make_tensor_df(n=50)
     seq_len = 10
-    ds = TimeSeriesDataset(df, ["f1"], ["target_1d"], sequence_len=seq_len)
+    ds = TimeSeriesDataset(df, ["f1"], ["target_1b"], sequence_len=seq_len)
     features, target = ds[0]
-    # The target should be the target_1d value at row index seq_len-1 (0-indexed)
-    expected = df["target_1d"][seq_len - 1]
+    # The target should be the target_1b value at row index seq_len-1 (0-indexed)
+    expected = df["target_1b"][seq_len - 1]
     assert abs(float(target[0]) - expected) < 1e-5
 
 
@@ -107,7 +110,7 @@ def test_multiple_missing_columns_reported():
     """All missing columns appear in a single error message, not just the first."""
     df = _make_tensor_df(n=50)
     with pytest.raises(DataValidationError, match="missing_a") as exc_info:
-        TimeSeriesDataset(df, ["f1", "missing_a", "missing_b"], ["target_1d"], sequence_len=10)
+        TimeSeriesDataset(df, ["f1", "missing_a", "missing_b"], ["target_1b"], sequence_len=10)
     # Both missing columns must appear in the error
     msg = str(exc_info.value)
     assert "missing_a" in msg
@@ -119,7 +122,7 @@ def test_getitem_returns_views():
     Proves zero-copy slicing by checking data_ptr() falls within the block's storage range.
     """
     df = _make_tensor_df(n=50)
-    ds = TimeSeriesDataset(df, ["f1", "f2", "f3"], ["target_1d"], sequence_len=10)
+    ds = TimeSeriesDataset(df, ["f1", "f2", "f3"], ["target_1b"], sequence_len=10)
 
     features, target = ds[0]
 
@@ -138,13 +141,13 @@ def test_values_match_naive_implementation():
     """Index-map dataset produces identical values to a naive sliding-window loop."""
     df = _make_tensor_df(n=100, n_tickers=2)
     feature_cols = ["f1", "f2", "f3"]
-    target_cols = ["target_1d"]
+    target_cols = ["target_1b"]
     seq_len = 10
 
     ds = TimeSeriesDataset(df, feature_cols, target_cols, sequence_len=seq_len)
 
     # Build naive reference: sort, group, slide
-    df_sorted = df.sort("ticker", "date")
+    df_sorted = df.sort("ticker", "timestamp")
     naive_windows = []
     for _, group_df in df_sorted.group_by("ticker", maintain_order=True):
         feat_np = group_df.select(feature_cols).to_numpy().astype(np.float32)
@@ -179,7 +182,7 @@ def test_memory_reduction():
     n_tickers = 6
     df = _make_tensor_df(n=n_days, n_tickers=n_tickers)
     feature_cols = ["f1", "f2", "f3"]
-    target_cols = ["target_1d"]
+    target_cols = ["target_1b"]
     seq_len = 10
 
     # --- Measure index-map approach ---
@@ -192,7 +195,7 @@ def test_memory_reduction():
 
     # --- Measure naive approach (materialize all windows as separate arrays) ---
     tracemalloc.start()
-    df_sorted = df.sort("ticker", "date")
+    df_sorted = df.sort("ticker", "timestamp")
     naive_windows = []
     for _, group_df in df_sorted.group_by("ticker", maintain_order=True):
         feat_np = group_df.select(feature_cols).to_numpy().astype(np.float32)

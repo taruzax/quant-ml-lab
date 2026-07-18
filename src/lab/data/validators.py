@@ -65,12 +65,12 @@ def validate_prices(df, price_columns=None, min_price=0.0):
             continue
         violations = df.filter(pl.col(col).is_not_null() & (pl.col(col) < min_price))
         if violations.height > 0:
-            sample = violations.head(5).select("date", "ticker", col)
+            sample = violations.head(5).select("timestamp", "ticker", col)
             raise DataValidationError(f"Column '{col}' has {violations.height} values below {min_price}.\nSample:\n{sample}")
     return df
 
 
-def validate_monotonic_dates(df, date_col="date", group_col="ticker"):
+def validate_monotonic_timestamps(df, date_col="timestamp", group_col="ticker"):
     if date_col not in df.columns:
         raise DataValidationError(f"Date column '{date_col}' not found.")
 
@@ -90,5 +90,5 @@ def run_all_validations(df: pl.DataFrame, config: PipelineConfig) -> pl.DataFram
     df = validate_schema(df)
     df = validate_nulls(df, tolerance=config.null_tolerance, columns=PRICE_COLUMNS)
     df = validate_prices(df, min_price=config.min_price)
-    df = validate_monotonic_dates(df)
+    df = validate_monotonic_timestamps(df)
     return df

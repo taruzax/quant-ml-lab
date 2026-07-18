@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import tracemalloc
+from datetime import datetime
 
 import numpy as np
 import polars as pl
@@ -16,21 +17,22 @@ from lab.data.tensor_loader import TimeSeriesDataset
 # from archive.archived_tensor_loader import TimeSeriesDataset
 
 
-def make_bench_df(n_tickers: int = 17, n_days: int = 2500, n_features: int = 60) -> pl.DataFrame:
+def make_bench_df(n_tickers: int = 17, n_periods: int = 2500, n_features: int = 60) -> pl.DataFrame:
     """Simulate production-scale data: 17 tickers × 2500 days × 60 features."""
     np.random.seed(42)
     frames = []
     for i in range(n_tickers):
-        dates = pl.date_range(
-            start=pl.date(2015, 1, 1),
-            end=pl.date(2015, 1, 1) + pl.duration(days=n_days - 1),
-            interval="1d",
+        dates = pl.datetime_range(
+            start=datetime(2015, 1, 1),
+            end=datetime(2015, 1, 1) + pl.duration(hours=n_periods - 1),
+            interval="1h",
+            time_unit="ns",
             eager=True,
         )
-        data = {"date": dates, "ticker": [f"TICK_{i}"] * n_days}
+        data = {"timestamp": dates, "ticker": [f"TICK_{i}"] * n_periods}
         for f in range(n_features):
-            data[f"f{f}"] = np.random.randn(n_days).astype(np.float64)
-        data["target_1d"] = np.random.randn(n_days).astype(np.float64)
+            data[f"f{f}"] = np.random.randn(n_periods).astype(np.float64)
+        data["target_1b"] = np.random.randn(n_periods).astype(np.float64)
         frames.append(pl.DataFrame(data))
     return pl.concat(frames)
 
@@ -41,14 +43,14 @@ def run_benchmark():
     print("=" * 60)
 
     feature_cols = [f"f{i}" for i in range(60)]
-    target_cols = ["target_1d"]
+    target_cols = ["target_1b"]
     seq_len = 60
-    n_tickers = 100
-    n_days = 2500
+    n_tickers = 1000
+    n_periods = 25000
     n_features = 60
 
     t0 = time.perf_counter()
-    df = make_bench_df(n_tickers, n_days, n_features)
+    df = make_bench_df(n_tickers, n_periods, n_features)
 
     tracemalloc.start()
     t0 = time.perf_counter()
@@ -79,7 +81,7 @@ def run_benchmark():
     # --- Shape sanity ---
     feat, tgt = ds[0]
     print(f"Tickers:       {n_tickers}")
-    print(f"Days:          {n_days}")
+    print(f"Periods:       {n_periods}")
     print(f"Features:      {n_features}")
     print(f"Seq Length:    {seq_len}")
     print(f"Shape check: features={feat.shape}, target={tgt.shape}")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import numpy as np
 import polars as pl
 import pytest
@@ -13,16 +15,17 @@ def single_ticker_df() -> pl.DataFrame:
     """300-row synthetic OHLCV DataFrame for ticker 'TEST'."""
     np.random.seed(42)
     n = 300
-    dates = pl.date_range(
-        start=pl.date(2024, 1, 1),
-        end=pl.date(2024, 1, 1) + pl.duration(days=n - 1),
+    dates = pl.datetime_range(
+        start=datetime(2024, 1, 1),
+        end=datetime(2024, 1, 1) + pl.duration(days=n - 1),
         interval="1d",
+        time_unit="ns",
         eager=True,
     )
     close = np.exp(np.cumsum(np.random.normal(0, 0.01, n))) * 100
     return pl.DataFrame(
         {
-            "date": dates,
+            "timestamp": dates,
             "ticker": ["TEST"] * n,
             "open": close * 0.99,
             "high": close * 1.02,
@@ -41,16 +44,17 @@ def multi_ticker_df(single_ticker_df) -> pl.DataFrame:
     df_a = single_ticker_df.with_columns(pl.lit("AAA").alias("ticker"))
     np.random.seed(99)
     n = 300
-    dates = pl.date_range(
-        start=pl.date(2024, 1, 1),
-        end=pl.date(2024, 1, 1) + pl.duration(days=n - 1),
+    dates = pl.datetime_range(
+        start=datetime(2024, 1, 1),
+        end=datetime(2024, 1, 1) + pl.duration(days=n - 1),
         interval="1d",
+        time_unit="ns",
         eager=True,
     )
     close = np.exp(np.cumsum(np.random.normal(0, 0.015, n))) * 50
     df_b = pl.DataFrame(
         {
-            "date": dates,
+            "timestamp": dates,
             "ticker": ["BBB"] * n,
             "open": close * 0.99,
             "high": close * 1.02,

@@ -8,7 +8,7 @@ from lab.core.config import PipelineConfig
 from lab.data.validators import (
     DataValidationError,
     run_all_validations,
-    validate_monotonic_dates,
+    validate_monotonic_timestamps,
     validate_nulls,
     validate_prices,
     validate_schema,
@@ -57,11 +57,11 @@ def test_negative_price_raises(single_ticker_df):
 def test_non_monotonic_dates_raises(single_ticker_df):
     df = single_ticker_df.head(10)
     # Swap two dates within the same ticker to break monotonicity
-    dates = df["date"].to_list()
+    dates = df["timestamp"].to_list()
     dates[2], dates[5] = dates[5], dates[2]
-    df = df.with_columns(pl.Series("date", dates))
+    df = df.with_columns(pl.Series("timestamp", dates))
     with pytest.raises(DataValidationError, match="Non-monotonic"):
-        validate_monotonic_dates(df)
+        validate_monotonic_timestamps(df)
 
 
 def test_empty_dataframe_raises(single_ticker_df):

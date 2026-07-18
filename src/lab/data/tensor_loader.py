@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import datetime
 
 import numpy as np
 import polars as pl
@@ -27,7 +27,7 @@ class TimeSeriesDataset(Dataset):
         target_cols,
         sequence_len,
         group_col: str = "ticker",
-        date_col: str = "date",
+        date_col: str = "timestamp",
     ):
         self.sequence_len = sequence_len
         self.feature_cols = feature_cols
@@ -90,13 +90,16 @@ def create_dataloaders(
     feature_cols,
     target_cols,
     config: PipelineConfig,
-    date_col: str = "date",
+    date_col: str = "timestamp",
 ):
     """Create train/val DataLoaders with time-based split.
     Returns: (train_loader, val_loader)
     """
     if config.train_cutoff_date is not None:
-        cutoff = date.fromisoformat(config.train_cutoff_date)
+        cutoff = datetime.fromisoformat(config.train_cutoff_date)
+        # If the user only provided a date (len == 10), default to the end of the day
+        if len(config.train_cutoff_date) == 10:
+            cutoff = cutoff.replace(hour=23, minute=59, second=59, microsecond=999999)
         train_df = df.filter(pl.col(date_col) <= cutoff)
         val_df = df.filter(pl.col(date_col) > cutoff)
     else:

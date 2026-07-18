@@ -23,7 +23,7 @@ def hrp_pypfort(cov_matrix, tickers):
 
 
 def hrp_pipe(returns_df, custom: bool = False):
-    wide_df = returns_df.select(pl.exclude("date"))
+    wide_df = returns_df.select(pl.exclude("timestamp"))
     tickers = wide_df.columns
     returns_matrix = wide_df.to_numpy()
     n_observations = returns_matrix.shape[0]

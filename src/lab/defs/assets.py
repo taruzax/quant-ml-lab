@@ -26,7 +26,7 @@ def _pipeline_config(resource: PipelineConfigResource) -> PipelineConfig:
 
 def _default_window(config: PipelineConfig) -> AssetWindow:
     start = datetime.fromisoformat(config.ingestion_start)
-    return AssetWindow(ticker="AAPL", start=start, end=start + timedelta(days=3))
+    return AssetWindow(ticker="AAPL", start=start, end=start + timedelta(days=30))
 
 def _clean_model_frame(df: pl.DataFrame, config: PipelineConfig) -> tuple[pl.DataFrame, list[str], list[str]]:
     target_cols = [target_col(horizon) for horizon in config.target_horizons if target_col(horizon) in df.columns]
@@ -48,8 +48,8 @@ def raw_ohlcv(context: AssetExecutionContext, config_py: PipelineConfigResource)
     return load_market_data(
         tickers=[window.ticker],
         interval=pipeline_config.ingestion_interval,
-        start=window.start.isoformat(),
-        end=window.end.isoformat(),
+        start=window.start.strftime("%Y-%m-%d"),
+        end=window.end.strftime("%Y-%m-%d"),
     )
 @asset(
     group_name=DATA_PIPELINE_GROUP,

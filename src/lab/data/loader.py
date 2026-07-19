@@ -68,7 +68,7 @@ def restructure_and_merge_data(stocks_df: pd.DataFrame, sector_df: pd.DataFrame)
     long_df.index.names = ["ticker", "timestamp"]
 
     merged_df = long_df.join(sector_df.set_index("ticker"))
-    merged_df = merged_df.dropna(subset=["sector", "industry"])
+    merged_df = merged_df.fillna({"sector": "Unknown", "industry": "Unknown"})
 
     return merged_df
 
@@ -85,8 +85,16 @@ def load_market_data(tickers: list[str], interval: str, start: str, end: str | N
 
     print("Data successfully loaded.")
     df_out = pl.DataFrame(merged_pd.reset_index())
+    
+    casts = []
     if "timestamp" in df_out.columns and df_out["timestamp"].dtype != pl.Datetime:
-        df_out = df_out.with_columns(pl.col("timestamp").cast(pl.Datetime))
+        casts.append(pl.col("timestamp").cast(pl.Datetime))
+    if "volume" in df_out.columns and df_out["volume"].dtype != pl.Float64:
+        casts.append(pl.col("volume").cast(pl.Float64))
+        
+    if casts:
+        df_out = df_out.with_columns(casts)
+        
     return df_out.sort(["ticker", "timestamp"])
 
 

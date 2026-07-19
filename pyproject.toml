@@ -60,6 +60,9 @@ registry_modules = [
     "lab.defs",
 ]
 
+[tool.dagster]
+module_name = "lab.defs"
+
 [project.scripts]
 run-pipeline = "lab.pipelines.data_pipeline:main"
 

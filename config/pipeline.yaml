@@ -1,0 +1,32 @@
+data:
+  raw_data_dir: "data/raw"
+  processed_data_dir: "data/processed"
+  ticker_config_path: "config/tickers.yaml"
+  ingestion_start: "2025-01-03"
+  timeframe: "1h"
+
+ffd:
+  ffd_threshold: 0.001
+  ffd_max_d: 1.0
+  ffd_min_d: 0.1
+  adf_significance: 0.05
+  ffd_coverage_threshold: 0.8
+
+validation:
+  null_tolerance: 0.001
+  min_price: 0.0
+
+tensor:
+  sequence_len: 60
+  batch_size: 32
+  train_cutoff_date: null
+
+risk:
+  max_position_size: 0.20
+  min_position_size: 0.05
+
+returns:
+  return_lags: [1, 5, 10, 21, 42, 63]
+  clip_quantile: 0.001
+  lookback_periods: [1, 2, 3, 4, 5]
+  target_horizons: [1, 5, 10, 21]

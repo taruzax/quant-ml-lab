@@ -2,8 +2,9 @@ from datetime import timedelta
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
+import yaml
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,9 +39,52 @@ TIMEFRAME_CONSTANTS: dict[Timeframe, TimeframeConstantValues] = {
 }
 
 
+PIPELINE_CONFIG_PATH = Path("config/pipeline.yaml")
+
+
+def _flatten_yaml(raw: dict[str, Any]) -> dict[str, Any]:
+    """Flatten sectioned YAML into PipelineConfig field namespace."""
+    flat: dict[str, Any] = {}
+    for section_values in raw.values():
+        if isinstance(section_values, dict):
+            flat.update(section_values)
+    return flat
+
+
+def _load_yaml_defaults(path: Path = PIPELINE_CONFIG_PATH) -> dict[str, Any]:
+    """Load YAML defaults using PipelineConfig field names."""
+    if not path.exists():
+        return {}
+
+    raw = yaml.safe_load(path.read_text()) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"Expected mapping in pipeline config YAML: {path}")
+    return _flatten_yaml(raw)
+
+
+def _yaml_settings_source() -> dict[str, Any]:
+    return _load_yaml_defaults()
+
+
 class PipelineConfig(BaseSettings):
     # Read from .env
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        return init_settings, env_settings, dotenv_settings, _yaml_settings_source, file_secret_settings
+
+    @classmethod
+    def from_yaml(cls, path: Path = PIPELINE_CONFIG_PATH) -> "PipelineConfig":
+        """Load config from YAML while preserving env/init override behavior."""
+        return cls(**_load_yaml_defaults(path))
 
     # Data paths
     raw_data_dir: Path = Path("data/raw")

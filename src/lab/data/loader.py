@@ -85,16 +85,16 @@ def load_market_data(tickers: list[str], interval: str, start: str, end: str | N
 
     print("Data successfully loaded.")
     df_out = pl.DataFrame(merged_pd.reset_index())
-    
+
     casts = []
     if "timestamp" in df_out.columns and df_out["timestamp"].dtype != pl.Datetime:
         casts.append(pl.col("timestamp").cast(pl.Datetime))
     if "volume" in df_out.columns and df_out["volume"].dtype != pl.Float64:
         casts.append(pl.col("volume").cast(pl.Float64))
-        
+
     if casts:
         df_out = df_out.with_columns(casts)
-        
+
     return df_out.sort(["ticker", "timestamp"])
 
 

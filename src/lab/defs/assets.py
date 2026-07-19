@@ -1,8 +1,9 @@
-
-import dagster as dg
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
+
 import polars as pl
+from dagster import AssetExecutionContext, AutomationCondition, MaterializeResult, MetadataValue, asset
+
 from lab.core.config import PipelineConfig
 from lab.core.schemas import target_col
 from lab.data.features import apply_all_features
@@ -11,22 +12,25 @@ from lab.data.loader import load_market_data
 from lab.data.tensor_loader import TimeSeriesDataset
 from lab.data.validators import run_all_validations
 from lab.defs.resources import PipelineConfigResource
-from dagster import AssetExecutionContext, MaterializeResult, AutomationCondition, MetadataValue, asset
 
 DATA_PIPELINE_GROUP = "data_pipeline"
 
-@dataclass(frozen = True)
+
+@dataclass(frozen=True)
 class AssetWindow:
     ticker: str
     start: datetime
     end: datetime
 
+
 def _pipeline_config(resource: PipelineConfigResource) -> PipelineConfig:
     return resource.to_pipeline_config()
+
 
 def _default_window(config: PipelineConfig) -> AssetWindow:
     start = datetime.fromisoformat(config.ingestion_start)
     return AssetWindow(ticker="AAPL", start=start, end=start + timedelta(days=30))
+
 
 def _clean_model_frame(df: pl.DataFrame, config: PipelineConfig) -> tuple[pl.DataFrame, list[str], list[str]]:
     target_cols = [target_col(horizon) for horizon in config.target_horizons if target_col(horizon) in df.columns]
@@ -51,6 +55,8 @@ def raw_ohlcv(context: AssetExecutionContext, config_py: PipelineConfigResource)
         start=window.start.strftime("%Y-%m-%d"),
         end=window.end.strftime("%Y-%m-%d"),
     )
+
+
 @asset(
     group_name=DATA_PIPELINE_GROUP,
     automation_condition=AutomationCondition.eager(),
@@ -81,7 +87,9 @@ def ffd_features(features: pl.DataFrame, config_py: PipelineConfigResource) -> p
 
 
 @asset(group_name=DATA_PIPELINE_GROUP)
-def tensors(context: AssetExecutionContext, ffd_features: pl.DataFrame, config_py: PipelineConfigResource) -> MaterializeResult[pl.DataFrame]:
+def tensors(
+    context: AssetExecutionContext, ffd_features: pl.DataFrame, config_py: PipelineConfigResource
+) -> MaterializeResult[pl.DataFrame]:
     pipeline_config = _pipeline_config(config_py)
     clean_df, feature_cols, target_cols = _clean_model_frame(ffd_features, pipeline_config)
 

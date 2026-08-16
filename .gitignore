@@ -16,3 +16,4 @@ log.md
 .pytest_cache
 .ruff_cache
 *_cache
+*.tmp*

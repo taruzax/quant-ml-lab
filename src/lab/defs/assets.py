@@ -4,13 +4,16 @@ from datetime import datetime, time, timedelta
 import polars as pl
 from dagster import (
     AssetExecutionContext,
+    AssetIn,
     AutomationCondition,
     DailyPartitionsDefinition,
+    DimensionPartitionMapping,
     DynamicPartitionsDefinition,
     MaterializeResult,
     MetadataValue,
-    MultiPartitionKey,
+    MultiPartitionMapping,
     MultiPartitionsDefinition,
+    TimeWindowPartitionMapping,
     asset,
 )
 
@@ -33,6 +36,13 @@ pipeline_partitions = MultiPartitionsDefinition(
         "time": time_window_partitions,
     }
 )
+LOOKBACK_MAPPING = MultiPartitionMapping(
+    {
+        "time": DimensionPartitionMapping(
+            dimension_name="time", partition_mapping=TimeWindowPartitionMapping(start_offset=-50, end_offset=0)
+        )
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -44,8 +54,6 @@ class AssetWindow:
 
 def partition_window(context: AssetExecutionContext) -> AssetWindow:
     key = context.partition_key
-    if not isinstance(key, MultiPartitionKey):
-        raise ValueError(f"Expected MultiPartitionKey, got {key!r}")
     ticker = key.keys_by_dimension["ticker"]
     day = datetime.combine(datetime.fromisoformat(key.keys_by_dimension["time"]).date(), time.min)
     return AssetWindow(ticker=ticker, start=day, end=day + timedelta(days=1))
@@ -98,18 +106,29 @@ def validated_data(raw_ohlcv: pl.DataFrame, config_py: PipelineConfigResource) -
 @asset(
     group_name=DATA_PIPELINE_GROUP,
     partitions_def=pipeline_partitions,
+    ins={"validated_data": AssetIn(partition_mapping=LOOKBACK_MAPPING)},
 )
-def features(validated_data: pl.DataFrame, config_py: PipelineConfigResource) -> pl.DataFrame:
-    return apply_all_features(validated_data, _pipeline_config(config_py))
+def features(
+    context: AssetExecutionContext, validated_data: dict[str, pl.DataFrame], config_py: PipelineConfigResource
+) -> pl.DataFrame:
+    combined_df = pl.concat(list(validated_data.values()), how="diagonal")
+    df = apply_all_features(combined_df, _pipeline_config(config_py))
+    time_str = context.partition_key.keys_by_dimension["time"]
+    target_date = datetime.fromisoformat(time_str).date()
+    return df.filter(pl.col("timestamp").dt.date() == target_date)
 
 
 @asset(
     group_name=DATA_PIPELINE_GROUP,
     partitions_def=pipeline_partitions,
+    ins={"features": AssetIn(partition_mapping=LOOKBACK_MAPPING)},
 )
-def ffd_features(features: pl.DataFrame, config_py: PipelineConfigResource) -> pl.DataFrame:
+def ffd_features(
+    context: AssetExecutionContext, features: dict[str, pl.DataFrame], config_py: PipelineConfigResource
+) -> pl.DataFrame:
+    combined_df = pl.concat(list(features.values()), how="diagonal")
     pipeline_config = _pipeline_config(config_py)
-    frame = features.with_columns(pl.col("close").log().alias("log_close"))
+    frame = combined_df.with_columns(pl.col("close").log().alias("log_close"))
     d_value = find_global_d(
         frame,
         col_name="log_close",
@@ -119,7 +138,11 @@ def ffd_features(features: pl.DataFrame, config_py: PipelineConfigResource) -> p
         min_d=pipeline_config.ffd_min_d,
         significance=pipeline_config.adf_significance,
     )
-    return frac_diff_polars(frame, col_name="log_close", d=d_value, threshold=pipeline_config.ffd_threshold)
+
+    df = frac_diff_polars(frame, col_name="log_close", d=d_value, threshold=pipeline_config.ffd_threshold)
+    time_str = context.partition_key.keys_by_dimension["time"]
+    target_date = datetime.fromisoformat(time_str).date()
+    return df.filter(pl.col("timestamp").dt.date() == target_date)
 
 
 @asset(

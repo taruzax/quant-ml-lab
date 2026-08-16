@@ -8,6 +8,7 @@ import lab.data.ffd as ffd_module
 # pyrefly: ignore [missing-import]
 from lab.data.ffd import (
     compute_memory_corr,
+    find_global_d,
     find_min_d,
     find_min_d_grid,
     frac_diff_polars,
@@ -220,3 +221,22 @@ def test_find_min_d_fallback(monkeypatch, single_ticker_df):
     # Should still return a valid d via grid search fallback
     d = find_min_d(df, col_name="log_close", threshold=0.01)
     assert 0.1 <= d <= 1.0, f"Fallback returned invalid d={d}"
+
+
+def test_find_global_d_with_reference():
+    df = pl.DataFrame({"ticker": ["AAPL"] * 60, "log_close": np.random.normal(0, 1, 60)})
+    d = find_global_d(df, col_name="log_close", reference_ticker="AAPL", min_d=0.1, max_d=1.0)
+    assert isinstance(d, float)
+
+
+def test_compute_memory_corr():
+    a = np.array([1.0, 2.0, np.nan])
+    b = np.array([2.0, 4.0, 5.0])
+    corr = compute_memory_corr(a, b)
+    assert abs(corr - 1.0) < 1e-7
+
+
+def test_find_min_d_grid_fallback():
+    df = pl.DataFrame({"ticker": ["AAPL"] * 60, "close": np.random.normal(0, 1, 60)})
+    d = find_min_d_grid(df, col_name="close", max_d=0.5, min_d=0.1)
+    assert 0.1 <= d <= 0.5

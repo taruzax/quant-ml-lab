@@ -1,8 +1,18 @@
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 import polars as pl
-from dagster import AssetExecutionContext, AutomationCondition, MaterializeResult, MetadataValue, asset
+from dagster import (
+    AssetExecutionContext,
+    AutomationCondition,
+    DailyPartitionsDefinition,
+    DynamicPartitionsDefinition,
+    MaterializeResult,
+    MetadataValue,
+    MultiPartitionKey,
+    MultiPartitionsDefinition,
+    asset,
+)
 
 from lab.core.config import PipelineConfig
 from lab.core.schemas import target_col
@@ -15,12 +25,30 @@ from lab.defs.resources import PipelineConfigResource
 
 DATA_PIPELINE_GROUP = "data_pipeline"
 
+ticker_partitions = DynamicPartitionsDefinition(name="tickers")
+time_window_partitions = DailyPartitionsDefinition(start_date="2020-01-01")
+pipeline_partitions = MultiPartitionsDefinition(
+    {
+        "ticker": ticker_partitions,
+        "time": time_window_partitions,
+    }
+)
+
 
 @dataclass(frozen=True)
 class AssetWindow:
     ticker: str
     start: datetime
     end: datetime
+
+
+def partition_window(context: AssetExecutionContext) -> AssetWindow:
+    key = context.partition_key
+    if not isinstance(key, MultiPartitionKey):
+        raise ValueError(f"Expected MultiPartitionKey, got {key!r}")
+    ticker = key.keys_by_dimension["ticker"]
+    day = datetime.combine(datetime.fromisoformat(key.keys_by_dimension["time"]).date(), time.min)
+    return AssetWindow(ticker=ticker, start=day, end=day + timedelta(days=1))
 
 
 def _pipeline_config(resource: PipelineConfigResource) -> PipelineConfig:
@@ -44,11 +72,12 @@ def _clean_model_frame(df: pl.DataFrame, config: PipelineConfig) -> tuple[pl.Dat
 
 @asset(
     group_name=DATA_PIPELINE_GROUP,
+    partitions_def=pipeline_partitions,
     automation_condition=AutomationCondition.eager(),
 )
 def raw_ohlcv(context: AssetExecutionContext, config_py: PipelineConfigResource) -> pl.DataFrame:
     pipeline_config = _pipeline_config(config_py)
-    window = _default_window(pipeline_config)
+    window = partition_window(context)
     return load_market_data(
         tickers=[window.ticker],
         interval=pipeline_config.ingestion_interval,
@@ -59,18 +88,25 @@ def raw_ohlcv(context: AssetExecutionContext, config_py: PipelineConfigResource)
 
 @asset(
     group_name=DATA_PIPELINE_GROUP,
+    partitions_def=pipeline_partitions,
     automation_condition=AutomationCondition.eager(),
 )
 def validated_data(raw_ohlcv: pl.DataFrame, config_py: PipelineConfigResource) -> pl.DataFrame:
     return run_all_validations(raw_ohlcv, _pipeline_config(config_py))
 
 
-@asset(group_name=DATA_PIPELINE_GROUP)
+@asset(
+    group_name=DATA_PIPELINE_GROUP,
+    partitions_def=pipeline_partitions,
+)
 def features(validated_data: pl.DataFrame, config_py: PipelineConfigResource) -> pl.DataFrame:
     return apply_all_features(validated_data, _pipeline_config(config_py))
 
 
-@asset(group_name=DATA_PIPELINE_GROUP)
+@asset(
+    group_name=DATA_PIPELINE_GROUP,
+    partitions_def=pipeline_partitions,
+)
 def ffd_features(features: pl.DataFrame, config_py: PipelineConfigResource) -> pl.DataFrame:
     pipeline_config = _pipeline_config(config_py)
     frame = features.with_columns(pl.col("close").log().alias("log_close"))
@@ -86,7 +122,10 @@ def ffd_features(features: pl.DataFrame, config_py: PipelineConfigResource) -> p
     return frac_diff_polars(frame, col_name="log_close", d=d_value, threshold=pipeline_config.ffd_threshold)
 
 
-@asset(group_name=DATA_PIPELINE_GROUP)
+@asset(
+    group_name=DATA_PIPELINE_GROUP,
+    partitions_def=pipeline_partitions,
+)
 def tensors(
     context: AssetExecutionContext, ffd_features: pl.DataFrame, config_py: PipelineConfigResource
 ) -> MaterializeResult[pl.DataFrame]:

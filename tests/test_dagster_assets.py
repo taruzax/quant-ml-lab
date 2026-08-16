@@ -5,7 +5,8 @@ import dagster as dg
 import numpy as np
 import polars as pl
 import yaml
-from dagster import materialize
+from dagster import DagsterInstance, MultiPartitionKey, materialize
+from dagster_polars import PolarsParquetIOManager
 
 from lab.core.config import PIPELINE_CONFIG_PATH, PipelineConfig, Timeframe
 from lab.defs.assets import (
@@ -18,6 +19,44 @@ from lab.defs.assets import (
 from lab.defs.resources import PipelineConfigResource
 
 ASSETS = [raw_ohlcv, validated_data, features, ffd_features, tensors]
+
+
+def test_partition_key_parsing():
+    key = MultiPartitionKey({"ticker": "AAPL", "time": "2024-01-02"})
+    assert key.keys_by_dimension["ticker"] == "AAPL"
+    assert key.keys_by_dimension["time"] == "2024-01-02"
+
+
+def test_partition_isolation(tmp_path):
+    instance = DagsterInstance.ephemeral()
+    instance.add_dynamic_partitions("tickers", ["AAPL", "MSFT"])
+    n_rows = 50
+    rng = np.random.default_rng(42)
+    close = np.exp(np.cumsum(rng.normal(0, 0.01, n_rows))) * 150
+    synthetic_df = pl.DataFrame(
+        {
+            "timestamp": [datetime(2024, 1, 2, 10, 0) + timedelta(hours=i) for i in range(n_rows)],
+            "ticker": ["AAPL"] * n_rows,
+            "open": close * 0.99,
+            "high": close * 1.02,
+            "low": close * 0.98,
+            "close": close,
+            "volume": rng.uniform(1_000_000, 2_000_000, n_rows),
+            "sector": ["Technology"] * n_rows,
+            "industry": ["Software"] * n_rows,
+        }
+    )
+    with patch("lab.defs.assets.load_market_data", return_value=synthetic_df):
+        result = materialize(
+            [raw_ohlcv],
+            partition_key=MultiPartitionKey({"ticker": "AAPL", "time": "2024-01-02"}),
+            instance=instance,
+            resources={
+                "config_py": PipelineConfigResource(timeframe="1h"),
+                "io_manager": PolarsParquetIOManager(base_dir=str(tmp_path / "dagster")),
+            },
+        )
+        assert result.success
 
 
 def test_pipeline_yaml_matches_pipeline_config_fields():
@@ -44,7 +83,7 @@ def test_asset_graph_resolves():
     assert len(defs.resolve_asset_graph().get_all_asset_keys()) == 5
 
 
-def test_asset_materialization_synthetic():
+def test_asset_materialization_synthetic(tmp_path):
     """
     Tests that the asset graph can execute and materialize end-to-end on synthetic data.
     """
@@ -65,14 +104,20 @@ def test_asset_materialization_synthetic():
         }
     )
 
+    instance = DagsterInstance.ephemeral()
+    instance.add_dynamic_partitions("tickers", ["AAPL"])
+
     with patch("lab.defs.assets.load_market_data", return_value=synthetic_df):
         result = materialize(
+            partition_key=MultiPartitionKey({"ticker": "AAPL", "time": "2024-01-02"}),
             assets=ASSETS,
+            instance=instance,
             resources={
                 "config_py": PipelineConfigResource(
                     timeframe=Timeframe.H1.value,
                     sequence_len=10,
                 ),
+                "io_manager": PolarsParquetIOManager(base_dir=str(tmp_path / "dagster")),
             },
         )
 

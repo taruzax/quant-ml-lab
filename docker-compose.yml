@@ -1,0 +1,35 @@
+services:
+  dagster-webserver:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+      - ./config:/app/config
+    environment:
+      - DAGSTER_HOME=/app/data/dagster_home
+    command: uv run dagster-webserver -h 0.0.0.0 -p 3000
+
+  dagster-daemon:
+    build: .
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+      - ./config:/app/config
+    environment:
+      - DAGSTER_HOME=/app/data/dagster_home
+    command: uv run dagster-daemon run
+
+  mlflow:
+    build: .
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./data/mlflow:/app/data/mlflow
+    command: >
+      uv run mlflow server 
+      --host 0.0.0.0 
+      --port 5000 
+      --backend-store-uri sqlite:////app/data/mlflow/mlflow.db 
+      --default-artifact-root /app/data/mlflow/artifacts

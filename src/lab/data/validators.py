@@ -19,7 +19,7 @@ def validate_schema(df, expected_columns=None, expected_dtypes=None):
         expected_dtypes = REQUIRED_DTYPES
 
     if df.is_empty():
-        return df
+        raise DataValidationError("DataFrame is empty. Cannot validate.")
 
     actual_cols = set(df.columns)
     missing = [c for c in expected_columns if c not in actual_cols]
@@ -39,7 +39,7 @@ def validate_schema(df, expected_columns=None, expected_dtypes=None):
 
 def validate_nulls(df, tolerance, columns=None):
     if df.is_empty():
-        return df
+        raise DataValidationError("DataFrame is empty. Cannot validate.")
     check_cols = columns if columns is not None else df.columns
     n_rows = df.height
 

@@ -10,7 +10,7 @@ from lab.defs.resources import PipelineConfigResource
 
 RawOHLCVSchema = pa.DataFrameSchema(
     {
-        "timestamp": pa.Column(pl.Datetime, nullable=False),
+        "timestamp": pa.Column(pl.Datetime("ns"), nullable=False),
         "ticker": pa.Column(str, nullable=False),
         "open": pa.Column(float, nullable=False),
         "high": pa.Column(float, nullable=False),

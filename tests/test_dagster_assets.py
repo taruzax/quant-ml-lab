@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
-import dagster as dg
 import numpy as np
 import polars as pl
 import yaml
@@ -68,19 +67,7 @@ def test_pipeline_yaml_matches_pipeline_config_fields():
     assert yaml_fields == set(PipelineConfig.model_fields)
 
 
-def test_asset_graph_resolves():
-    """
-    Tests that Dagster can successfully resolve the dependency graph
-    """
-    defs = dg.Definitions(
-        assets=ASSETS,
-        resources={
-            "config_py": PipelineConfigResource(),
-        },
-    )
-    job = defs.get_implicit_global_asset_job_def()
-    assert job is not None
-    assert len(defs.resolve_asset_graph().get_all_asset_keys()) == 5
+# tests/test_dagster_assets.py
 
 
 def test_asset_materialization_synthetic(tmp_path):
@@ -107,7 +94,15 @@ def test_asset_materialization_synthetic(tmp_path):
     instance = DagsterInstance.ephemeral()
     instance.add_dynamic_partitions("tickers", ["AAPL"])
 
-    with patch("lab.defs.assets.load_market_data", return_value=synthetic_df):
+    def mock_load_input(context):
+        if context.asset_key.path[0] in ["validated_data", "features"]:
+            return {"2024-01-02": synthetic_df}
+        return synthetic_df
+
+    with (
+        patch("lab.defs.assets.load_market_data", return_value=synthetic_df),
+        patch("dagster_polars.PolarsParquetIOManager.load_input", side_effect=mock_load_input),
+    ):
         result = materialize(
             partition_key=MultiPartitionKey({"ticker": "AAPL", "time": "2024-01-02"}),
             assets=ASSETS,

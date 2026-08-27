@@ -119,6 +119,18 @@ class PipelineConfig(BaseSettings):
     lookback_periods: list[int] = [1, 2, 3, 4, 5]
     target_horizons: list[int] = [1, 5, 10, 21]
 
+    # Triple-Barrier Labeling (TBM)
+    profit_taking: float = 2.0
+    stop_loss: float = 2.0
+    vol_lookback_bars: int = 20
+    expiry_bars: int = 10
+    min_volatility: float = 1e-4
+
+    # Purged Cross-Validation
+    cv_mode: bool = False
+    n_splits: int = 5
+    embargo_bars: int = 10
+
     @property
     def ingestion_interval(self) -> str:
         return TIMEFRAME_CONSTANTS[self.timeframe]["ingestion_interval"]

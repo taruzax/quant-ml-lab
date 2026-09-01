@@ -17,3 +17,4 @@ log.md
 .ruff_cache
 *_cache
 *.tmp*
+*.db

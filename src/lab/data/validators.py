@@ -44,13 +44,15 @@ def validate_nulls(df, tolerance, columns=None):
     n_rows = df.height
 
     for col in check_cols:
-        if col not in check_cols:
+        if col not in df.columns:
             continue
         null_count = df[col].null_count()
+        if df[col].dtype in (pl.Float32, pl.Float64):
+            null_count += df.filter(pl.col(col).is_nan()).height
         null_ratio = null_count / n_rows
         if null_ratio > tolerance:
             raise DataValidationError(
-                f"Column '{col}' has {null_count}/{n_rows} nulls ({null_ratio:.4%}), exceeds tolerance {tolerance:.4%}"
+                f"Column '{col}' has {null_count}/{n_rows} nulls/NaNs ({null_ratio:.4%}), exceeds tolerance {tolerance:.4%}"
             )
     return df
 

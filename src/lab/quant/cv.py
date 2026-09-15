@@ -5,6 +5,8 @@ import numpy as np
 import polars as pl
 from sklearn.model_selection._split import _BaseKFold
 
+from lab.core.contracts import FoldSpec
+
 
 class PurgedKFold(_BaseKFold):
     """Purged and Embargoed Cross-Validation Splitter."""
@@ -71,6 +73,8 @@ class PurgedKFold(_BaseKFold):
 
     def _get_t1_series(self, X, n_samples: int) -> pl.Series:
         """Event end times, as a polars Series of length ``n_samples``."""
+        if self.t1 is None and self._column(X, ("t1",)) is None:
+            raise ValueError("PurgedKFold requires explicit non-null t1 event ends; positional fallback is forbidden")
         return self._resolve_series(self.t1, X, ("t1",), 1, n_samples, "t1")
 
     def _get_t0_series(self, X, n_samples: int) -> pl.Series:
@@ -140,3 +144,61 @@ class PurgedKFold(_BaseKFold):
 
             train_indices = np.concatenate((left_indices, right_indices)).astype(np.int64)
             yield train_indices, test_indices
+
+
+def purge_training_labels(labels: pl.DataFrame, evaluation_start) -> pl.DataFrame:
+    """Keep only labels whose information resolves strictly before evaluation."""
+    if "t1" not in labels.columns:
+        raise ValueError("Label frame must contain t1 for purging")
+    if labels["t1"].null_count():
+        raise ValueError("Unresolved labels with null t1 cannot enter a supervised split")
+    if "decision_time" not in labels.columns:
+        raise ValueError("Label frame must contain decision_time for purging")
+    return labels.filter(pl.col("t1") < evaluation_start)
+
+
+def scoreable_labels(labels: pl.DataFrame, evaluation_start, evaluation_end) -> tuple[pl.DataFrame, dict[str, int]]:
+    """Return only predictions whose labels resolve inside the permitted period."""
+    if "t1" not in labels.columns:
+        raise ValueError("Label frame must contain t1 for scoring")
+    unresolved = int(labels["t1"].null_count())
+    resolved = labels.filter(pl.col("t1").is_not_null())
+    scoreable = resolved.filter(
+        (pl.col("decision_time") >= evaluation_start)
+        & (pl.col("decision_time") < evaluation_end)
+        & (pl.col("t1") >= evaluation_start)
+        & (pl.col("t1") < evaluation_end)
+    )
+    return scoreable, {
+        "input_rows": labels.height,
+        "unresolved_rows": unresolved,
+        "scoreable_rows": scoreable.height,
+        "excluded_rows": labels.height - unresolved - scoreable.height,
+    }
+
+
+def information_interval(feature_start, label_end):
+    """Return the full information interval used by a sequence sample."""
+    if feature_start is None or label_end is None:
+        raise ValueError("Information intervals require both feature start and label end")
+    return feature_start, label_end
+
+
+def purge_by_information_interval(
+    samples: pl.DataFrame, evaluation_start, evaluation_end, *, start_col: str = "feature_start", end_col: str = "t1"
+) -> pl.DataFrame:
+    """Remove samples whose full feature/label information overlaps evaluation."""
+    missing = {start_col, end_col} - set(samples.columns)
+    if missing:
+        raise ValueError(f"Sample information intervals are missing columns: {sorted(missing)}")
+    if samples.select(pl.col(end_col).is_null().any()).item():
+        raise ValueError("Information intervals cannot contain null label ends")
+    return samples.filter((pl.col(end_col) < evaluation_start) | (pl.col(start_col) >= evaluation_end))
+
+
+def fold_training_labels(labels: pl.DataFrame, fold: FoldSpec) -> pl.DataFrame:
+    """Select chronological training labels and apply equality-safe purging."""
+    candidates = labels.filter(
+        (pl.col("decision_time") >= fold.train_start) & (pl.col("decision_time") < fold.train_end)
+    )
+    return purge_training_labels(candidates, fold.validation_start)

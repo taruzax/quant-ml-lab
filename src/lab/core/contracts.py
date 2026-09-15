@@ -54,11 +54,78 @@ class PreparedDataset(ContractModel):
     labels: pl.DataFrame
     split_plan: Any
     exclusions: pl.DataFrame | dict[str, Any] = Field(default_factory=dict)
+    config: Any | None = None
 
     @field_validator("feature_specification")
     @classmethod
     def validate_features(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return validate_feature_names(value)
+
+
+class LabelResult(ContractModel):
+    schema_version: str = "label-result.v2"
+    labels: pl.DataFrame
+    exclusions: pl.DataFrame
+    target_name: str
+    conventions: dict[str, Any] = Field(default_factory=dict)
+
+
+class FoldSpec(ContractModel):
+    schema_version: str = "fold-spec.v1"
+    fold_id: int
+    train_start: datetime
+    train_end: datetime
+    validation_start: datetime
+    validation_end: datetime
+
+    @model_validator(mode="after")
+    def validate_order(self) -> "FoldSpec":
+        if not self.train_start < self.train_end <= self.validation_start < self.validation_end:
+            raise ValueError("Fold intervals must be ordered half-open intervals")
+        return self
+
+
+class ExecutionPeriod(ContractModel):
+    schema_version: str = "execution-period.v1"
+    name: str
+    first_decision: datetime
+    last_decision: datetime
+    final_liquidation_open: datetime
+
+
+class SplitPlan(ContractModel):
+    schema_version: str = "split-plan.v1"
+    decision_timestamps: tuple[datetime, ...]
+    development_start: datetime
+    holdout_start: datetime
+    holdout_end: datetime
+    folds: tuple[FoldSpec, ...]
+    execution_periods: tuple[ExecutionPeriod, ...]
+    embargo_bars: int = 0
+
+    @model_validator(mode="after")
+    def validate_plan(self) -> "SplitPlan":
+        if tuple(sorted(set(self.decision_timestamps))) != self.decision_timestamps:
+            raise ValueError("Split decision timestamps must be unique and chronological")
+        if not self.development_start < self.holdout_start < self.holdout_end:
+            raise ValueError("Development and holdout boundaries must be ordered")
+        if not self.folds:
+            raise ValueError("Split plan requires at least one validation fold")
+        return self
+
+
+class PreprocessingState(ContractModel):
+    schema_version: str = "preprocessing-state.v1"
+    feature_order: tuple[str, ...]
+    clip_thresholds: dict[str, tuple[float, float]] = Field(default_factory=dict)
+    vocabularies: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    means: dict[str, float] = Field(default_factory=dict)
+    scales: dict[str, float] = Field(default_factory=dict)
+    ffd_orders: dict[str, float | None] = Field(default_factory=dict)
+    ffd_truncation: dict[str, int] = Field(default_factory=dict)
+    ffd_features: tuple[str, ...] = ()
+    ffd_threshold: float = 0.001
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
 
 
 class SampleSet(ContractModel):

@@ -6,7 +6,14 @@ import polars_talib as plta
 from lab.core.config import PipelineConfig, Timeframe
 
 # pyrefly: ignore [missing-import]
-from lab.core.schemas import lagged_col, return_col, target_col
+from lab.core.schemas import (
+    CAUSAL_BASE_FEATURES,
+    FUTURE_DERIVED_COLUMNS,
+    lagged_col,
+    return_col,
+    target_col,
+    validate_feature_names,
+)
 
 
 def calculate_dollar_volume(df: pl.DataFrame, config: PipelineConfig) -> pl.DataFrame:
@@ -31,13 +38,16 @@ def calculate_technical_indicators(df: pl.DataFrame) -> pl.DataFrame:
 def calculate_returns(
     df: pl.DataFrame,
     lags: list[int] | None = None,
-    clip_quantile: float = 0.001,
+    clip_quantile: float | None = None,
 ):
     """
     For each lag in lags, computes:
       raw_return = close / close.shift(lag) - 1
-      clipped = clip to [quantile(q), quantile(1-q)]
-      normalized = (clipped + 1)^(1/lag) - 1
+      normalized = (raw_return + 1)^(1/lag) - 1
+
+    Clipping is deliberately not performed here. Quantile thresholds are a
+    fold-fitted preprocessing state, and fitting them on the full frame would
+    let future observations alter historical features.
 
     Migrated from transform.py
     """
@@ -48,11 +58,7 @@ def calculate_returns(
     for lag in lags:
         col_name = return_col(lag)
         raw_return = (pl.col("close") / pl.col("close").shift(lag).over("ticker")) - 1
-        clipped_return = raw_return.clip(
-            raw_return.quantile(clip_quantile),
-            raw_return.quantile(1 - clip_quantile),
-        )
-        normalized = clipped_return.add(1).pow(1 / lag).sub(1).alias(col_name)
+        normalized = raw_return.add(1).pow(1 / lag).sub(1).alias(col_name)
         exprs.append(normalized)
 
     return df.with_columns(exprs)
@@ -174,12 +180,54 @@ def create_time_cycles(df: pl.DataFrame, config: PipelineConfig) -> pl.DataFrame
 
 
 def apply_all_features(df: pl.DataFrame, config: PipelineConfig) -> pl.DataFrame:
-    """Applies all feature transformations in sequence. Does NOT apply FFD — that's separate."""
+    """Build only unfitted, causal feature candidates.
+
+    Forward labels, quantile clipping, categorical vocabularies, and FFD
+    selection are fold operations and intentionally do not happen here.
+    """
+    if "ticker" not in df.columns or "timestamp" not in df.columns:
+        raise ValueError("Feature construction requires ticker and timestamp columns")
+    future_columns = [
+        column
+        for column in df.columns
+        if column in FUTURE_DERIVED_COLUMNS or column.startswith("target_")
+    ]
+    if future_columns:
+        df = df.drop(future_columns)
+    df = df.sort(["ticker", "timestamp"])
     df = calculate_dollar_volume(df, config)
     df = calculate_technical_indicators(df)
-    df = calculate_returns(df, config.return_lags, config.clip_quantile)
-    df = calculate_lagged_features(df, config.target_horizons, config.lookback_periods)
-    df = calculate_forward_targets(df, config.target_horizons)
+    df = calculate_returns(df, config.return_lags)
+    df = calculate_lagged_features(df, config.return_lags, config.lookback_periods)
     df = create_time_cycles(df, config)
-    df = create_sector_dummies(df)
     return df
+
+
+def feature_specification(df: pl.DataFrame, config: PipelineConfig) -> tuple[str, ...]:
+    """Return the explicit causal feature order for a frame.
+
+    The default is a named allow-list, never ``all numeric columns``. A
+    configured list is validated against the same future-derived deny-list.
+    """
+    requested = config.features.feature_columns
+    if requested is not None:
+        names = validate_feature_names(requested, set(df.columns))
+    else:
+        candidates = list(CAUSAL_BASE_FEATURES)
+        candidates.extend(return_col(lag) for lag in config.return_lags)
+        candidates.extend(
+            lagged_col(lag, lookback)
+            for lookback in config.lookback_periods
+            for lag in config.return_lags
+        )
+        names = tuple(name for name in candidates if name in df.columns)
+        names = validate_feature_names(names, set(df.columns))
+    forbidden = [name for name in names if name in {"timestamp", "ticker", "sector", "industry"}]
+    if forbidden:
+        raise ValueError(f"Identifiers and raw categorical columns cannot be model features: {forbidden}")
+    return names
+
+
+def select_features(df: pl.DataFrame, config: PipelineConfig) -> pl.DataFrame:
+    """Select the configured causal feature columns without fitting state."""
+    return df.select(["ticker", "timestamp", *feature_specification(df, config)])

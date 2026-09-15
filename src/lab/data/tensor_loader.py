@@ -1,5 +1,5 @@
 """Compatibility exports for the relocated sample module."""
 
-from lab.research.samples import TimeSeriesDataset, create_dataloaders
+from lab.research.samples import InferenceTimeSeriesDataset, TimeSeriesDataset, collate_batch, create_dataloaders
 
-__all__ = ["TimeSeriesDataset", "create_dataloaders"]
+__all__ = ["InferenceTimeSeriesDataset", "TimeSeriesDataset", "collate_batch", "create_dataloaders"]

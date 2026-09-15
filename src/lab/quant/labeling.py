@@ -1,10 +1,179 @@
 import logging
+from typing import Any
 
+import numpy as np
+import pandas as pd
 import polars as pl
 
-from lab.core.config import PipelineConfig
+from lab.core.config import PipelineConfig, TaskConfig
+from lab.core.contracts import LabelResult, MarketSnapshot
+from lab.quant.barriers import barrier_prices, first_barrier_touch
 
 logger = logging.getLogger(__name__)
+
+
+def _empty_labels(kind: str) -> pl.DataFrame:
+    columns: dict[str, pl.Series] = {
+        "ticker": pl.Series([], dtype=pl.Utf8),
+        "decision_time": pl.Series([], dtype=pl.Datetime(time_zone="UTC")),
+        "entry_time": pl.Series([], dtype=pl.Datetime(time_zone="UTC")),
+        "event_end": pl.Series([], dtype=pl.Datetime(time_zone="UTC")),
+        "t1": pl.Series([], dtype=pl.Datetime(time_zone="UTC")),
+    }
+    if kind == "regression":
+        columns.update(
+            {
+                "target": pl.Series([], dtype=pl.Float64),
+                "target_1b_v2": pl.Series([], dtype=pl.Float64),
+                "target_1b": pl.Series([], dtype=pl.Float64),
+            }
+        )
+    else:
+        columns.update(
+            {
+                "label": pl.Series([], dtype=pl.Int8),
+                "target": pl.Series([], dtype=pl.Int8),
+            }
+        )
+    return pl.DataFrame(columns)
+
+
+def _empty_exclusions() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "ticker": pl.Series([], dtype=pl.Utf8),
+            "decision_time": pl.Series([], dtype=pl.Datetime(time_zone="UTC")),
+            "reason": pl.Series([], dtype=pl.Utf8),
+        }
+    )
+
+
+def _bar_time_column(bars: pl.DataFrame, name: str) -> str:
+    if name in bars.columns:
+        return name
+    if "timestamp" in bars.columns:
+        return "timestamp"
+    raise ValueError("Bars require timestamp or canonical bar time columns")
+
+
+def _causal_ewm_volatility(values: list[float], config: TaskConfig) -> list[float | None]:
+    barrier = config.triple_barrier
+    returns = [np.nan]
+    returns.extend(values[i] / values[i - 1] - 1.0 for i in range(1, len(values)))
+    series = pd.Series(returns, dtype="float64")
+    volatility = series.ewm(
+        span=barrier.volatility_span,
+        adjust=barrier.ewm_adjust,
+        min_periods=barrier.volatility_warmup,
+    ).std(bias=barrier.ewm_bias)
+    result: list[float | None] = []
+    for value in volatility.to_list():
+        if value is None or not np.isfinite(value):
+            result.append(None)
+        else:
+            result.append(max(float(value), barrier.volatility_floor))
+    return result
+
+
+def compute_labels(snapshot: MarketSnapshot, task_config: TaskConfig) -> LabelResult:
+    """Compute complete labels from raw bars without using feature columns.
+
+    Regression uses the next two opens. Classification freezes volatility and
+    percentage distances at the decision close, observes closes through the
+    expiry bar, and resolves at the next open after the trigger or expiry.
+    """
+    bars = snapshot.bars.sort(["ticker", "timestamp"])
+    time_column = _bar_time_column(bars, "timestamp")
+    records: list[dict[str, Any]] = []
+    exclusions: list[dict[str, Any]] = []
+
+    for ticker, group in bars.group_by("ticker", maintain_order=True):
+        ticker_name = ticker[0] if isinstance(ticker, tuple) else ticker
+        group = group.sort(time_column)
+        rows = group.to_dicts()
+        closes = [float(row["close"]) for row in rows]
+        volatility = _causal_ewm_volatility(closes, task_config)
+        for index, row in enumerate(rows):
+            decision_time = row[time_column]
+            if task_config.kind == "regression":
+                if index + 2 >= len(rows):
+                    exclusions.append({"ticker": ticker_name, "decision_time": decision_time, "reason": "tail"})
+                    continue
+                entry = rows[index + 1]
+                finish = rows[index + 2]
+                target = float(finish["open"]) / float(entry["open"]) - 1.0
+                records.append(
+                    {
+                        "ticker": ticker_name,
+                        "decision_time": decision_time,
+                        "entry_time": entry.get("bar_open_time", entry[time_column]),
+                        "event_end": finish.get("bar_close_time", finish[time_column]),
+                        "t1": finish.get("bar_open_time", finish[time_column]),
+                        "target": target,
+                        "target_1b_v2": target,
+                        "target_1b": target,
+                    }
+                )
+                continue
+
+            if volatility[index] is None:
+                exclusions.append({"ticker": ticker_name, "decision_time": decision_time, "reason": "warmup"})
+                continue
+            expiry = task_config.triple_barrier.expiry_bars
+            entry_index = index + 1
+            expiry_index = index + expiry
+            if expiry_index >= len(rows) or expiry_index + 1 >= len(rows):
+                exclusions.append({"ticker": ticker_name, "decision_time": decision_time, "reason": "tail"})
+                continue
+            entry = rows[entry_index]
+            entry_price = float(entry["open"])
+            upper, lower = barrier_prices(entry_price, float(volatility[index]), task_config)
+            touch_offset, direction = first_barrier_touch(
+                [float(rows[offset]["close"]) for offset in range(entry_index, expiry_index + 1)], upper, lower
+            )
+            trigger_index = expiry_index if touch_offset is None else entry_index + touch_offset
+            if touch_offset is not None and direction == 0:
+                raise ValueError("Barrier touch must resolve to a non-zero direction")
+            execution_index = trigger_index + 1
+            if execution_index >= len(rows):
+                exclusions.append({"ticker": ticker_name, "decision_time": decision_time, "reason": "tail"})
+                continue
+            trigger = rows[trigger_index]
+            execution = rows[execution_index]
+            records.append(
+                {
+                    "ticker": ticker_name,
+                    "decision_time": decision_time,
+                    "entry_time": entry.get("bar_open_time", entry[time_column]),
+                    "event_end": trigger.get("bar_close_time", trigger[time_column]),
+                    "t1": execution.get("bar_open_time", execution[time_column]),
+                    "label": direction,
+                    "target": direction,
+                    "volatility": float(volatility[index]),
+                    "upper_barrier": upper,
+                    "lower_barrier": lower,
+                }
+            )
+
+    labels = pl.DataFrame(records) if records else _empty_labels(task_config.kind)
+    if records:
+        labels = labels.sort(["ticker", "decision_time"])
+    excluded_frame = pl.DataFrame(exclusions) if exclusions else _empty_exclusions()
+    if exclusions:
+        excluded_frame = excluded_frame.sort(["ticker", "decision_time"])
+    target_name = "target_1b_v2" if task_config.kind == "regression" else "label"
+    return LabelResult(
+        labels=labels,
+        exclusions=excluded_frame,
+        target_name=target_name,
+        conventions={
+            "decision_time": "close timestamp",
+            "entry_time": "next bar open",
+            "event_end": "trigger or expiry close",
+            "t1": "open after trigger or expiry",
+            "classification_target": "barrier direction, not net P&L",
+        },
+    )
 
 
 def calculate_volatility(

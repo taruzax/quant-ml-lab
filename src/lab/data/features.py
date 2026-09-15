@@ -9,6 +9,8 @@ from lab.quant.features import (
     calculate_forward_targets,
     create_sector_dummies,
     create_time_cycles,
+    feature_specification,
+    select_features,
 )
 
 __all__ = [
@@ -20,4 +22,6 @@ __all__ = [
     "calculate_forward_targets",
     "create_sector_dummies",
     "create_time_cycles",
+    "feature_specification",
+    "select_features",
 ]

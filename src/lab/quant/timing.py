@@ -66,7 +66,7 @@ def normalize_provider_timestamp(
 
     timestamp = as_utc(value, timezone_name=timezone_name)
     calendar = get_exchange_calendar(calendar_name)
-    session = calendar.minute_to_session_label(pd.Timestamp(timestamp), direction="none")
+    session = calendar.minute_to_session(pd.Timestamp(timestamp), direction="none")
     candidates = bar_times_for_session(calendar_name, session, timeframe)
     for opened, closed, session_id in candidates:
         if role == "bar_open" and timestamp == opened:
@@ -87,7 +87,7 @@ def normalize_explicit_bar_times(
     if close_time <= open_time:
         raise ValueError("bar_close_time must be after bar_open_time")
     calendar = get_exchange_calendar(calendar_name)
-    session = calendar.minute_to_session_label(pd.Timestamp(open_time), direction="none")
+    session = calendar.minute_to_session(pd.Timestamp(open_time), direction="none")
     expected = bar_times_for_session(calendar_name, session, timeframe)
     if (open_time, close_time) not in [(item[0], item[1]) for item in expected]:
         raise ValueError(

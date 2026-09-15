@@ -19,6 +19,7 @@ CATEGORICAL_COLUMNS: list[str] = ["sector", "industry"]
 FUTURE_DERIVED_COLUMNS: set[str] = {
     "target",
     "target_1b",
+    "target_1b_v2",
     "t1",
     "entry_time",
     "event_end",
@@ -26,6 +27,29 @@ FUTURE_DERIVED_COLUMNS: set[str] = {
     "upper_barrier",
     "lower_barrier",
 }
+
+CAUSAL_BASE_FEATURES: tuple[str, ...] = (
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "dollar_vol",
+    "dollar_vol_1m",
+    "dollar_vol_rank",
+    "ema5",
+    "macd",
+    "macdsignal",
+    "cdl2crows",
+    "wclprice",
+    "year_scaled",
+    "month_sin",
+    "month_cos",
+    "weekday_sin",
+    "weekday_cos",
+    "hour_sin",
+    "hour_cos",
+)
 
 REQUIRED_DTYPES: dict[str, type[pl.DataType]] = {
     "timestamp": pl.Datetime,

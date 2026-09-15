@@ -47,6 +47,40 @@ def frac_diff_polars(df: pl.DataFrame, col_name: str, d: float, threshold: float
     return df.with_columns(expr.alias(f"{col_name}_frac_diff"))
 
 
+def frac_diff_ffd(
+    df: pl.DataFrame,
+    col_name: str,
+    orders_by_ticker: dict[str, float],
+    threshold: float = 0.001,
+    output_col: str | None = None,
+    log_input: bool = False,
+) -> pl.DataFrame:
+    """Apply fitted ticker-local FFD weights while preserving input row order."""
+    if "ticker" not in df.columns or col_name not in df.columns:
+        raise ValueError("FFD execution requires ticker and source columns")
+    output_col = output_col or f"{col_name}_frac_diff"
+    working = df.with_columns(pl.int_range(0, pl.len()).alias("__ffd_row_order"))
+    if "timestamp" in working.columns:
+        working = working.sort(["ticker", "timestamp"])
+    frames: list[pl.DataFrame] = []
+    for ticker, group in working.group_by("ticker", maintain_order=True):
+        ticker_name = str(ticker[0] if isinstance(ticker, tuple) else ticker)
+        d = orders_by_ticker.get(ticker_name)
+        if d is None:
+            raise ValueError(f"No fitted FFD order is available for ticker '{ticker_name}'")
+        source_col = "__ffd_source"
+        group = group.with_columns(
+            pl.col(col_name).log().alias(source_col) if log_input else pl.col(col_name).alias(source_col)
+        )
+        diff_col = f"{source_col}_frac_diff"
+        diffed = frac_diff_polars(group, source_col, d, threshold)
+        if output_col in diffed.columns:
+            diffed = diffed.drop(output_col)
+        diffed = diffed.rename({diff_col: output_col})
+        frames.append(diffed.drop(source_col))
+    return pl.concat(frames, how="vertical_relaxed").sort("__ffd_row_order").drop("__ffd_row_order")
+
+
 def find_min_d_grid(
     df_ticker: pl.DataFrame,
     col_name: str = "close",

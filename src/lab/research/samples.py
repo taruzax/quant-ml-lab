@@ -60,9 +60,9 @@ class TimeSeriesDataset(Dataset):
         for group_name, group_df in df.group_by(group_col, maintain_order=True):
             n_rows = group_df.height
             ticker_name = group_name[0] if isinstance(group_name, tuple) else group_name
-            if n_rows < sequence_len + 1:
+            if n_rows < sequence_len:
                 logger.warning(
-                    "Ticker '%s' has %d rows, need %d + 1. Skipping.",
+                    "Ticker '%s' has %d rows, need at least %d. Skipping.",
                     ticker_name,
                     n_rows,
                     sequence_len,
@@ -83,7 +83,7 @@ class TimeSeriesDataset(Dataset):
             self._date_blocks.append(dates_np)
             self._ticker_blocks.append(tickers_np)
 
-            n_windows = n_rows - sequence_len
+            n_windows = n_rows - sequence_len + 1
             for i in range(n_windows):
                 self._index_map.append((block_idx, i))
 
@@ -98,6 +98,51 @@ class TimeSeriesDataset(Dataset):
         timestamp = self._date_blocks[block_idx][target_idx]
         ticker = self._ticker_blocks[block_idx][target_idx]
         return features, target, timestamp, ticker
+
+
+class InferenceTimeSeriesDataset(Dataset):
+    """Target-free aligned windows for inference."""
+
+    def __init__(self, df: pl.DataFrame, feature_cols: list[str], sequence_len: int, **kwargs):
+        self._dataset = TimeSeriesDataset(
+            df.with_columns(pl.lit(0.0).alias("__inference_target")),
+            feature_cols,
+            ["__inference_target"],
+            sequence_len,
+            **kwargs,
+        )
+
+    def __len__(self) -> int:
+        return len(self._dataset)
+
+    def __getitem__(self, idx):
+        features, _, timestamp, ticker = self._dataset[idx]
+        return features, timestamp, ticker
+
+
+def collate_batch(batch):
+    """Collate tensors with ordered, lossless UTC key metadata."""
+    if not batch:
+        raise ValueError("Cannot collate an empty batch")
+    if len(batch[0]) == 3:
+        features, timestamps, tickers = zip(*batch)
+        return {
+            "features": torch.stack(list(features)),
+            "timestamps": tuple(timestamps),
+            "tickers": tuple(tickers),
+            "keys": tuple(zip(tickers, timestamps)),
+        }
+    features, targets, timestamps, tickers = zip(*batch)
+    return {
+        "features": torch.stack(list(features)),
+        "target": torch.stack(list(targets)),
+        "timestamps": tuple(timestamps),
+        "tickers": tuple(tickers),
+        "keys": tuple(zip(tickers, timestamps)),
+    }
+
+
+collate_fn = collate_batch
 
 
 def create_dataloaders(
@@ -156,11 +201,9 @@ def create_dataloaders(
         return train_loader, val_loader
 
     # 3. Purged K-Fold Cross-Validation Mode (cv_mode=True)
-    timeline_df = (
-        df.group_by(date_col).agg(pl.col(t1_col).max()).sort(date_col)
-        if t1_col in df.columns
-        else df.select(pl.col(date_col).unique()).with_columns(pl.col(date_col).alias(t1_col)).sort(date_col)
-    )
+    if t1_col not in df.columns:
+        raise DataValidationError("Purged CV requires an explicit t1 column; timestamp fallback is forbidden")
+    timeline_df = df.group_by(date_col).agg(pl.col(t1_col).max()).sort(date_col)
 
     splitter = PurgedKFold(
         n_splits=n_splits if n_splits is not None else config.n_splits,

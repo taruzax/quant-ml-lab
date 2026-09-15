@@ -392,6 +392,7 @@ def load_market_snapshot(config: PipelineConfig) -> MarketSnapshot:
     else:
         tickers = load_tickers(config.data.ticker_config_path)
         frame = load_market_data(tickers, config.ingestion_interval, config.data.ingestion_start)
+        timestamp_role = "session_date" if config.data.timeframe == Timeframe.D1 else "bar_open"
         provenance = {
             "source": "provider",
             "provider": "yfinance",
@@ -403,7 +404,10 @@ def load_market_snapshot(config: PipelineConfig) -> MarketSnapshot:
             calendar=config.data.calendar,
             timeframe=config.data.timeframe,
             provenance=provenance,
-            metadata={"timestamp_role": "bar_close"},
+            metadata={
+                "timestamp_role": timestamp_role,
+                "timezone": "America/New_York",
+            },
         )
 
     metadata = _read_metadata(metadata_path)

@@ -1,44 +1,110 @@
 data:
+  source: "local"
   raw_data_dir: "data/raw"
   processed_data_dir: "data/processed"
   ticker_config_path: "config/tickers.yaml"
+  input_path: null
+  metadata_path: null
   ingestion_start: "2025-01-03"
   timeframe: "1h"
-
-ffd:
-  ffd_threshold: 0.001
-  ffd_max_d: 1.0
-  ffd_min_d: 0.1
-  adf_significance: 0.05
-  ffd_coverage_threshold: 0.8
+  calendar: "XNYS"
+  price_adjustment: "adjusted"
 
 validation:
   null_tolerance: 0.001
   min_price: 0.0
+  require_timezone: true
+
+features:
+  return_lags: [1, 5, 10, 21, 42, 63]
+  clip_quantile: 0.001
+  lookback_periods: [1, 2, 3, 4, 5]
+  target_horizons: [1, 5, 10, 21]
+  feature_columns: null
+
+ffd:
+  threshold: 0.001
+  max_d: 1.0
+  min_d: 0.1
+  adf_significance: 0.05
+  coverage_threshold: 0.8
 
 tensor:
   sequence_len: 60
   batch_size: 32
   train_cutoff_date: null
 
-risk:
+task:
+  kind: "regression"
+  triple_barrier:
+    profit_taking: 2.0
+    stop_loss: 2.0
+    expiry_bars: 10
+    volatility_span: 20
+    volatility_warmup: 20
+    volatility_floor: 0.0001
+    ewm_adjust: false
+    ewm_bias: false
+
+splits:
+  n_folds: 3
+  holdout_fraction: 0.20
+  development_train_fraction: 0.50
+  embargo_bars: 0
+  diagnostic_mode: false
+  explicit_boundaries: null
+
+models:
+  device: "cpu"
+  seed: 42
+  early_stopping: false
+  baseline:
+    enabled: true
+    params: {}
+  xgboost:
+    enabled: true
+    params:
+      n_estimators: 200
+      max_depth: 3
+      learning_rate: 0.05
+      subsample: 1.0
+      colsample_bytree: 1.0
+  gru:
+    enabled: false
+    params:
+      hidden_size: 32
+      num_layers: 1
+      learning_rate: 0.001
+      epochs: 20
+      batch_size: 32
+  lstm:
+    enabled: false
+    params:
+      hidden_size: 32
+      num_layers: 1
+      learning_rate: 0.001
+      epochs: 20
+      batch_size: 32
+
+allocation:
+  method: "equal_weight"
+  lookback_bars: 252
+  rebalance_every_bars: 21
   max_position_size: 0.20
   min_position_size: 0.05
+  gross_limit: 1.0
 
-returns:
-  return_lags: [1, 5, 10, 21, 42, 63]
-  clip_quantile: 0.001
-  lookback_periods: [1, 2, 3, 4, 5]
-  target_horizons: [1, 5, 10, 21]
+backtest:
+  initial_capital: 100000
+  dead_zone: 0.0
+  classification_confidence: 0.5
+  fees_bps: 5.0
+  slippage_bps: 0.0
 
-labeling:
-  profit_taking: 2.0
-  stop_loss: 2.0
-  vol_lookback_bars: 20
-  expiry_bars: 10
-  min_volatility: 0.0001
+statistics:
+  frequency: "daily"
+  min_observations: 30
 
-cv:
-  cv_mode: false
-  n_splits: 5
-  embargo_bars: 10
+campaign:
+  name: "local-research"
+  seed: 42

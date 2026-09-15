@@ -1,10 +1,15 @@
+import hashlib
+import json
+import warnings
+from copy import deepcopy
 from datetime import timedelta
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,28 +43,291 @@ TIMEFRAME_CONSTANTS: dict[Timeframe, TimeframeConstantValues] = {
     },
 }
 
-
 PIPELINE_CONFIG_PATH = Path("config/pipeline.yaml")
+PLATFORM_CONFIG_PATH = Path("config/platform.yaml")
 
 
-def _flatten_yaml(raw: dict[str, Any]) -> dict[str, Any]:
-    """Flatten sectioned YAML into PipelineConfig field namespace."""
-    flat: dict[str, Any] = {}
-    for section_values in raw.values():
-        if isinstance(section_values, dict):
-            flat.update(section_values)
-    return flat
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+
+class DataConfig(StrictModel):
+    source: Literal["bundled_demo", "local", "provider"] = "bundled_demo"
+    raw_data_dir: Path = Path("data/raw")
+    processed_data_dir: Path = Path("data/processed")
+    ticker_config_path: Path = Path("config/tickers.yaml")
+    input_path: Path | None = None
+    metadata_path: Path | None = None
+    ingestion_start: str = "2025-01-01"
+    timeframe: Timeframe = Timeframe.H1
+    calendar: str = "XNYS"
+    price_adjustment: Literal["adjusted", "unadjusted"] = "adjusted"
+
+
+class ValidationConfig(StrictModel):
+    null_tolerance: float = Field(default=0.001, ge=0.0, le=1.0)
+    min_price: float = Field(default=0.0, ge=0.0)
+    require_timezone: bool = True
+
+
+class FeaturesConfig(StrictModel):
+    return_lags: list[PositiveInt] = Field(default_factory=lambda: [1, 5, 10, 21, 42, 63])
+    clip_quantile: float = Field(default=0.001, ge=0.0, lt=0.5)
+    lookback_periods: list[PositiveInt] = Field(default_factory=lambda: [1, 2, 3, 4, 5])
+    target_horizons: list[PositiveInt] = Field(default_factory=lambda: [1, 5, 10, 21])
+    feature_columns: list[str] | None = None
+
+
+class FFDConfig(StrictModel):
+    threshold: float = Field(default=0.001, gt=0.0)
+    max_d: float = Field(default=1.0, ge=0.0)
+    min_d: float = Field(default=0.1, ge=0.0)
+    adf_significance: float = Field(default=0.05, gt=0.0, lt=1.0)
+    coverage_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "FFDConfig":
+        if self.min_d > self.max_d:
+            raise ValueError("ffd.min_d must not exceed ffd.max_d")
+        return self
+
+
+class TensorConfig(StrictModel):
+    sequence_len: PositiveInt = 60
+    batch_size: PositiveInt = 32
+    train_cutoff_date: str | None = None
+
+
+class TripleBarrierConfig(StrictModel):
+    profit_taking: float = Field(default=2.0, gt=0.0)
+    stop_loss: float = Field(default=2.0, gt=0.0)
+    expiry_bars: PositiveInt = 10
+    volatility_span: PositiveInt = 20
+    volatility_warmup: PositiveInt = 20
+    volatility_floor: float = Field(default=0.0001, gt=0.0)
+    ewm_adjust: bool = False
+    ewm_bias: bool = False
+
+
+class TaskConfig(StrictModel):
+    kind: Literal["regression", "classification"] = "regression"
+    triple_barrier: TripleBarrierConfig = Field(default_factory=TripleBarrierConfig)
+
+
+class SplitsConfig(StrictModel):
+    n_folds: PositiveInt = 3
+    holdout_fraction: float = Field(default=0.20, gt=0.0, lt=1.0)
+    development_train_fraction: float = Field(default=0.50, gt=0.0, lt=1.0)
+    embargo_bars: int = Field(default=0, ge=0)
+    diagnostic_mode: bool = False
+    explicit_boundaries: dict[str, str] | None = None
+
+
+class ModelSpec(StrictModel):
+    enabled: bool
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class ModelsConfig(StrictModel):
+    baseline: ModelSpec = Field(default_factory=lambda: ModelSpec(enabled=True))
+    xgboost: ModelSpec = Field(
+        default_factory=lambda: ModelSpec(
+            enabled=True,
+            params={
+                "n_estimators": 200,
+                "max_depth": 3,
+                "learning_rate": 0.05,
+                "subsample": 1.0,
+                "colsample_bytree": 1.0,
+            },
+        )
+    )
+    gru: ModelSpec = Field(default_factory=lambda: ModelSpec(enabled=False, params={"hidden_size": 32, "num_layers": 1}))
+    lstm: ModelSpec = Field(default_factory=lambda: ModelSpec(enabled=False, params={"hidden_size": 32, "num_layers": 1}))
+    device: Literal["cpu", "cuda"] = "cpu"
+    seed: int = 42
+    early_stopping: bool = False
+
+
+class AllocationConfig(StrictModel):
+    method: Literal["equal_weight", "hrp"] = "equal_weight"
+    lookback_bars: PositiveInt = 252
+    rebalance_every_bars: PositiveInt = 21
+    max_position_size: float = Field(default=0.20, gt=0.0, le=1.0)
+    min_position_size: float = Field(default=0.05, ge=0.0, le=1.0)
+    gross_limit: float = Field(default=1.0, gt=0.0)
+
+    @model_validator(mode="after")
+    def validate_limits(self) -> "AllocationConfig":
+        if self.min_position_size > self.max_position_size:
+            raise ValueError("allocation.min_position_size must not exceed max_position_size")
+        if self.max_position_size > self.gross_limit:
+            raise ValueError("allocation.max_position_size must not exceed gross_limit")
+        return self
+
+
+class BacktestConfig(StrictModel):
+    initial_capital: float = Field(default=100_000.0, gt=0.0)
+    dead_zone: float = Field(default=0.0, ge=0.0)
+    classification_confidence: float | None = Field(default=0.5, ge=0.0, le=1.0)
+    fees_bps: float = Field(default=5.0, ge=0.0)
+    slippage_bps: float = Field(default=0.0, ge=0.0)
+
+
+class StatisticsConfig(StrictModel):
+    frequency: Literal["native", "daily"] = "daily"
+    min_observations: PositiveInt = 30
+
+
+class CampaignConfig(StrictModel):
+    name: str = "local-research"
+    seed: int = 42
+
+
+class PlatformPathsConfig(StrictModel):
+    artifacts_dir: Path = Path("artifacts")
+    snapshot_dir: Path = Path("data/snapshots")
+    mlflow_tracking_uri: str = "file:./data/mlflow"
+
+
+class MLflowConfig(StrictModel):
+    enabled: bool = True
+    experiment_name: str = "quant-ml-lab"
+
+
+class PlatformConfig(StrictModel):
+    paths: PlatformPathsConfig = Field(default_factory=PlatformPathsConfig)
+    mlflow: MLflowConfig = Field(default_factory=MLflowConfig)
+
+    @classmethod
+    def from_yaml(cls, path: Path = PLATFORM_CONFIG_PATH) -> "PlatformConfig":
+        return cls.model_validate(_read_yaml(path))
+
+
+CANONICAL_SECTIONS = {
+    "data",
+    "validation",
+    "features",
+    "ffd",
+    "tensor",
+    "task",
+    "splits",
+    "models",
+    "allocation",
+    "backtest",
+    "statistics",
+    "campaign",
+}
+
+
+def _read_yaml(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    raw = yaml.safe_load(path.read_text()) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"Expected mapping in YAML config: {path}")
+    return raw
+
+
+def _set_nested(mapping: dict[str, Any], path: tuple[str, ...], value: Any, source: str) -> None:
+    target = mapping
+    for key in path[:-1]:
+        if key in target and not isinstance(target[key], dict):
+            raise ValueError(f"Cannot translate {source}: {'.'.join(path)} conflicts with a scalar")
+        target = target.setdefault(key, {})
+    leaf = path[-1]
+    if leaf in target and target[leaf] != value:
+        raise ValueError(f"Conflicting settings for {'.'.join(path)} from {source}")
+    target[leaf] = value
+
+
+def _translate_yaml(raw: dict[str, Any]) -> dict[str, Any]:
+    translated: dict[str, Any] = {key: deepcopy(value) for key, value in raw.items() if key in CANONICAL_SECTIONS}
+    legacy_sections = {
+        "labeling": {
+            "profit_taking": ("task", "triple_barrier", "profit_taking"),
+            "stop_loss": ("task", "triple_barrier", "stop_loss"),
+            "vol_lookback_bars": ("task", "triple_barrier", "volatility_span"),
+            "expiry_bars": ("task", "triple_barrier", "expiry_bars"),
+            "min_volatility": ("task", "triple_barrier", "volatility_floor"),
+        },
+        "returns": {
+            "return_lags": ("features", "return_lags"),
+            "clip_quantile": ("features", "clip_quantile"),
+            "lookback_periods": ("features", "lookback_periods"),
+            "target_horizons": ("features", "target_horizons"),
+        },
+        "risk": {
+            "max_position_size": ("allocation", "max_position_size"),
+            "min_position_size": ("allocation", "min_position_size"),
+        },
+        "cv": {
+            "n_splits": ("splits", "n_folds"),
+            "embargo_bars": ("splits", "embargo_bars"),
+            "cv_mode": ("splits", "diagnostic_mode"),
+        },
+    }
+    for section, fields in legacy_sections.items():
+        if section not in raw:
+            continue
+        warnings.warn(f"'{section}' is legacy configuration; use canonical nested sections", UserWarning, stacklevel=3)
+        values = raw[section]
+        if not isinstance(values, dict):
+            raise ValueError(f"Legacy section '{section}' must be a mapping")
+        for key, value in values.items():
+            if key not in fields:
+                raise ValueError(f"Unknown key '{section}.{key}' in legacy configuration")
+            _set_nested(translated, fields[key], value, f"legacy {section}")
+
+    flat_fields = {
+        "raw_data_dir": ("data", "raw_data_dir"),
+        "processed_data_dir": ("data", "processed_data_dir"),
+        "ticker_config_path": ("data", "ticker_config_path"),
+        "ingestion_start": ("data", "ingestion_start"),
+        "timeframe": ("data", "timeframe"),
+        "ffd_threshold": ("ffd", "threshold"),
+        "ffd_max_d": ("ffd", "max_d"),
+        "ffd_min_d": ("ffd", "min_d"),
+        "adf_significance": ("ffd", "adf_significance"),
+        "ffd_coverage_threshold": ("ffd", "coverage_threshold"),
+        "null_tolerance": ("validation", "null_tolerance"),
+        "min_price": ("validation", "min_price"),
+        "sequence_len": ("tensor", "sequence_len"),
+        "batch_size": ("tensor", "batch_size"),
+        "train_cutoff_date": ("tensor", "train_cutoff_date"),
+        "profit_taking": ("task", "triple_barrier", "profit_taking"),
+        "stop_loss": ("task", "triple_barrier", "stop_loss"),
+        "vol_lookback_bars": ("task", "triple_barrier", "volatility_span"),
+        "expiry_bars": ("task", "triple_barrier", "expiry_bars"),
+        "min_volatility": ("task", "triple_barrier", "volatility_floor"),
+        "cv_mode": ("splits", "diagnostic_mode"),
+        "n_splits": ("splits", "n_folds"),
+        "embargo_bars": ("splits", "embargo_bars"),
+    }
+    for key, path in flat_fields.items():
+        if key in raw:
+            warnings.warn(f"'{key}' is a legacy flat setting; use '{'.'.join(path)}'", UserWarning, stacklevel=3)
+            _set_nested(translated, path, raw[key], "legacy flat setting")
+
+    unknown = set(raw) - CANONICAL_SECTIONS - set(legacy_sections) - set(flat_fields)
+    if unknown:
+        raise ValueError(f"Unknown configuration sections or keys: {sorted(unknown)}")
+    return translated
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    result = deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = deepcopy(value)
+    return result
 
 
 def _load_yaml_defaults(path: Path = PIPELINE_CONFIG_PATH) -> dict[str, Any]:
-    """Load YAML defaults using PipelineConfig field names."""
-    if not path.exists():
-        return {}
-
-    raw = yaml.safe_load(path.read_text()) or {}
-    if not isinstance(raw, dict):
-        raise ValueError(f"Expected mapping in pipeline config YAML: {path}")
-    return _flatten_yaml(raw)
+    """Load nested YAML settings, translating legacy sections explicitly."""
+    return _translate_yaml(_read_yaml(path))
 
 
 def _yaml_settings_source() -> dict[str, Any]:
@@ -67,8 +335,26 @@ def _yaml_settings_source() -> dict[str, Any]:
 
 
 class PipelineConfig(BaseSettings):
-    # Read from .env
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_nested_delimiter="__",
+        extra="forbid",
+        case_sensitive=False,
+    )
+
+    data: DataConfig = Field(default_factory=DataConfig)
+    validation: ValidationConfig = Field(default_factory=ValidationConfig)
+    features: FeaturesConfig = Field(default_factory=FeaturesConfig)
+    ffd: FFDConfig = Field(default_factory=FFDConfig)
+    tensor: TensorConfig = Field(default_factory=TensorConfig)
+    task: TaskConfig = Field(default_factory=TaskConfig)
+    splits: SplitsConfig = Field(default_factory=SplitsConfig)
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
+    allocation: AllocationConfig = Field(default_factory=AllocationConfig)
+    backtest: BacktestConfig = Field(default_factory=BacktestConfig)
+    statistics: StatisticsConfig = Field(default_factory=StatisticsConfig)
+    campaign: CampaignConfig = Field(default_factory=CampaignConfig)
 
     @classmethod
     def settings_customise_sources(
@@ -81,55 +367,48 @@ class PipelineConfig(BaseSettings):
     ):
         return init_settings, env_settings, dotenv_settings, _yaml_settings_source, file_secret_settings
 
+    def __init__(self, **data: Any):
+        super().__init__(**_translate_yaml(data))
+
     @classmethod
-    def from_yaml(cls, path: Path = PIPELINE_CONFIG_PATH) -> "PipelineConfig":
-        """Load config from YAML while preserving env/init override behavior."""
-        return cls(**_load_yaml_defaults(path))
+    def from_yaml(cls, path: Path = PIPELINE_CONFIG_PATH, overrides: dict[str, Any] | None = None) -> "PipelineConfig":
+        values = _load_yaml_defaults(path)
+        if overrides:
+            values = _deep_merge(values, _translate_yaml(overrides))
+        return cls(**values)
 
-    # Data paths
-    raw_data_dir: Path = Path("data/raw")
-    processed_data_dir: Path = Path("data/processed")
-    ticker_config_path: Path = Path("config/tickers.yaml")
-    ingestion_start: str = "2025-01-01"
-    timeframe: Timeframe = Timeframe.H1
+    def model_hash(self) -> str:
+        payload = self.model_dump(mode="json")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
-    # FFD parameters
-    ffd_threshold: float = 0.001
-    ffd_max_d: float = 1.0
-    ffd_min_d: float = 0.1
-    adf_significance: float = 0.05
-    ffd_coverage_threshold: float = 0.8
+    @property
+    def resolved_config_hash(self) -> str:
+        return self.model_hash()
 
-    # Validation thresholds
-    null_tolerance: float = 0.001
-    min_price: float = 0.0
+    @property
+    def raw_data_dir(self) -> Path:
+        return self.data.raw_data_dir
 
-    # Tensor factory
-    sequence_len: int = 60
-    batch_size: int = 32
-    train_cutoff_date: str | None = None
+    @property
+    def processed_data_dir(self) -> Path:
+        return self.data.processed_data_dir
 
-    # Risk engine
-    max_position_size: float = 0.20
-    min_position_size: float = 0.05
+    @property
+    def ticker_config_path(self) -> Path:
+        return self.data.ticker_config_path
 
-    # Returns
-    return_lags: list[int] = [1, 5, 10, 21, 42, 63]
-    clip_quantile: float = 0.001
-    lookback_periods: list[int] = [1, 2, 3, 4, 5]
-    target_horizons: list[int] = [1, 5, 10, 21]
+    @property
+    def ingestion_start(self) -> str:
+        return self.data.ingestion_start
 
-    # Triple-Barrier Labeling (TBM)
-    profit_taking: float = 2.0
-    stop_loss: float = 2.0
-    vol_lookback_bars: int = 20
-    expiry_bars: int = 10
-    min_volatility: float = 1e-4
+    @property
+    def timeframe(self) -> Timeframe:
+        return self.data.timeframe
 
-    # Purged Cross-Validation
-    cv_mode: bool = False
-    n_splits: int = 5
-    embargo_bars: int = 10
+    @property
+    def calendar(self) -> str:
+        return self.data.calendar
 
     @property
     def ingestion_interval(self) -> str:
@@ -151,7 +430,108 @@ class PipelineConfig(BaseSettings):
     def rolling_month_bars(self) -> int:
         return TIMEFRAME_CONSTANTS[self.timeframe]["rolling_month_bars"]
 
+    @property
+    def ffd_threshold(self) -> float:
+        return self.ffd.threshold
+
+    @property
+    def ffd_max_d(self) -> float:
+        return self.ffd.max_d
+
+    @property
+    def ffd_min_d(self) -> float:
+        return self.ffd.min_d
+
+    @property
+    def adf_significance(self) -> float:
+        return self.ffd.adf_significance
+
+    @property
+    def ffd_coverage_threshold(self) -> float:
+        return self.ffd.coverage_threshold
+
+    @property
+    def null_tolerance(self) -> float:
+        return self.validation.null_tolerance
+
+    @property
+    def min_price(self) -> float:
+        return self.validation.min_price
+
+    @property
+    def sequence_len(self) -> int:
+        return self.tensor.sequence_len
+
+    @property
+    def batch_size(self) -> int:
+        return self.tensor.batch_size
+
+    @property
+    def train_cutoff_date(self) -> str | None:
+        return self.tensor.train_cutoff_date
+
+    @property
+    def max_position_size(self) -> float:
+        return self.allocation.max_position_size
+
+    @property
+    def min_position_size(self) -> float:
+        return self.allocation.min_position_size
+
+    @property
+    def return_lags(self) -> list[int]:
+        return self.features.return_lags
+
+    @property
+    def clip_quantile(self) -> float:
+        return self.features.clip_quantile
+
+    @property
+    def lookback_periods(self) -> list[int]:
+        return self.features.lookback_periods
+
+    @property
+    def target_horizons(self) -> list[int]:
+        return self.features.target_horizons
+
+    @property
+    def profit_taking(self) -> float:
+        return self.task.triple_barrier.profit_taking
+
+    @property
+    def stop_loss(self) -> float:
+        return self.task.triple_barrier.stop_loss
+
+    @property
+    def vol_lookback_bars(self) -> int:
+        return self.task.triple_barrier.volatility_span
+
+    @property
+    def expiry_bars(self) -> int:
+        return self.task.triple_barrier.expiry_bars
+
+    @property
+    def min_volatility(self) -> float:
+        return self.task.triple_barrier.volatility_floor
+
+    @property
+    def cv_mode(self) -> bool:
+        return self.splits.diagnostic_mode
+
+    @property
+    def n_splits(self) -> int:
+        return self.splits.n_folds
+
+    @property
+    def embargo_bars(self) -> int:
+        return self.splits.embargo_bars
+
 
 @lru_cache
-def get_config():
+def get_config() -> PipelineConfig:
     return PipelineConfig()
+
+
+@lru_cache
+def get_platform_config() -> PlatformConfig:
+    return PlatformConfig.from_yaml()

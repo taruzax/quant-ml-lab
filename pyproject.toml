@@ -10,6 +10,7 @@ dependencies = [
     "dagster-webserver>=1.13.14",
     "mlflow>=2.15.0",
     "datasets>=4.8.4",
+    "exchange-calendars>=4.5",
     "ipykernel>=7.2.0",
     "matplotlib>=3.10.8",
     "numpy>=2.2.6",
@@ -60,11 +61,11 @@ directory_type = "project"
 [tool.dg.project]
 root_module = "lab"
 registry_modules = [
-    "lab.defs",
+    "lab.platform.dagster",
 ]
 
 [tool.dagster]
-module_name = "lab.defs"
+module_name = "lab.platform.dagster"
 
 [project.scripts]
 run-pipeline = "lab.pipelines.data_pipeline:main"

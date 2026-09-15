@@ -1,37 +1,5 @@
-import pandas as pd
-import polars as pl
-from pypfopt import HRPOpt
+"""Compatibility exports for the relocated HRP module."""
 
-from lab.risk_engine.covariance import denoise_cov, led_wo_shrinkage
+from lab.quant.hrp import hrp_custom, hrp_pipe, hrp_pypfort
 
-
-def hrp_custom(cov_matrix, tickers):
-    """Custom polars native HRP"""
-    pass
-
-
-def hrp_pypfort(cov_matrix, tickers):
-    """Non optimized, non custom HRP implementation from PyPortfolioOpt package
-    Inputs:
-        - cov matrix as an input (denoised or normal)
-        - list of assets names
-    """
-    denoise_cov_df = pd.DataFrame(cov_matrix, index=tickers, columns=tickers)
-    hrp = HRPOpt(returns=None, cov_matrix=denoise_cov_df)
-    hrp.optimize()
-    return dict(hrp.clean_weights())
-
-
-def hrp_pipe(returns_df, custom: bool = False):
-    wide_df = returns_df.select(pl.exclude("timestamp"))
-    tickers = wide_df.columns
-    returns_matrix = wide_df.to_numpy()
-    n_observations = returns_matrix.shape[0]
-
-    cov_matrix, _ = led_wo_shrinkage(returns_matrix)
-    denoised_matrix = denoise_cov(cov_matrix, n_observations)
-
-    if custom:
-        return hrp_custom(denoised_matrix, tickers)
-    else:
-        return hrp_pypfort(denoised_matrix, tickers)
+__all__ = ["hrp_custom", "hrp_pipe", "hrp_pypfort"]

@@ -1,0 +1,9 @@
+dataset: synthetic demonstration
+generator_version: synthetic-demo-v1
+seed: 42
+calendar: XNYS
+timeframe: 1d
+timestamp_role: bar_close
+timezone: UTC
+price_adjustment: unadjusted
+provenance: Generated common factor plus independent asset noise; not market evidence.

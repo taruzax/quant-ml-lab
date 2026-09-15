@@ -7,15 +7,15 @@ import polars as pl
 from dagster import MultiPartitionKey
 
 from lab.core.config import Timeframe
-from lab.defs.assets import features, ffd_features, raw_ohlcv, tensors, validated_data
-from lab.defs.checks import (
+from lab.platform.dagster.assets import features, ffd_features, raw_ohlcv, tensors, validated_data
+from lab.platform.dagster.checks import (
     features_finite_check,
     ffd_features_finite_check,
     raw_ohlcv_schema_check,
     tensors_manifest_check,
     validated_data_schema_check,
 )
-from lab.defs.resources import PipelineConfigResource
+from lab.platform.dagster.resources import PipelineConfigResource
 
 # We want to test the full graph, including the checks.
 ASSETS = [raw_ohlcv, validated_data, features, ffd_features, tensors]
@@ -59,7 +59,7 @@ def test_smoke_asset_graph(tmp_path):
     # Mock the context for partition_window
     context = dg.build_asset_context(partition_key=MultiPartitionKey({"ticker": "AAPL", "time": "2025-01-01"}))
 
-    with patch("lab.defs.assets.load_market_data", return_value=synthetic_df):
+    with patch("lab.platform.dagster.assets.load_market_data", return_value=synthetic_df):
         df_raw = raw_ohlcv(context, config)
 
     assert df_raw.height == n_rows

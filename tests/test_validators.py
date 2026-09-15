@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 import polars as pl
 import pytest
 
@@ -13,6 +15,7 @@ from lab.data.validators import (
     validate_prices,
     validate_schema,
 )
+from lab.quant.validators import validate_canonical_bars
 
 
 def test_valid_data_passes(single_ticker_df):
@@ -75,3 +78,50 @@ def test_run_all_validations_chains(single_ticker_df):
     config = PipelineConfig()
     with pytest.raises(DataValidationError):
         run_all_validations(df, config)
+
+
+def test_canonical_bars_accept_valid_contract():
+    opened = datetime(2024, 1, 2, 14, 30, tzinfo=timezone.utc)
+    closed = opened + timedelta(hours=1)
+    result = validate_canonical_bars(
+        pl.DataFrame(
+            {
+                "ticker": ["AAA"],
+                "raw_bar_index": [0],
+                "bar_open_time": [opened],
+                "bar_close_time": [closed],
+                "timestamp": [closed],
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.5],
+                "volume": [1000.0],
+                "session_id": ["2024-01-02"],
+            }
+        ),
+        calendar="XNYS",
+        timeframe="1h",
+    )
+    assert result.height == 1
+
+
+def test_canonical_bars_reject_bad_ohlc():
+    opened = datetime(2024, 1, 2, 14, 30, tzinfo=timezone.utc)
+    closed = opened + timedelta(hours=1)
+    invalid = pl.DataFrame(
+        {
+            "ticker": ["AAA"],
+            "raw_bar_index": [0],
+            "bar_open_time": [opened],
+            "bar_close_time": [closed],
+            "timestamp": [closed],
+            "open": [100.0],
+            "high": [98.0],
+            "low": [99.0],
+            "close": [100.5],
+            "volume": [1000.0],
+            "session_id": ["2024-01-02"],
+        }
+    )
+    with pytest.raises(DataValidationError, match="OHLC"):
+        validate_canonical_bars(invalid, calendar="XNYS", timeframe="1h")

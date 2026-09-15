@@ -8,14 +8,14 @@ from dagster import DagsterInstance, MultiPartitionKey, materialize
 from dagster_polars import PolarsParquetIOManager
 
 from lab.core.config import PIPELINE_CONFIG_PATH, PipelineConfig, Timeframe
-from lab.defs.assets import (
+from lab.platform.dagster.assets import (
     features,
     ffd_features,
     raw_ohlcv,
     tensors,
     validated_data,
 )
-from lab.defs.resources import PipelineConfigResource
+from lab.platform.dagster.resources import PipelineConfigResource
 
 ASSETS = [raw_ohlcv, validated_data, features, ffd_features, tensors]
 
@@ -45,7 +45,7 @@ def test_partition_isolation(tmp_path):
             "industry": ["Software"] * n_rows,
         }
     )
-    with patch("lab.defs.assets.load_market_data", return_value=synthetic_df):
+    with patch("lab.platform.dagster.assets.load_market_data", return_value=synthetic_df):
         result = materialize(
             [raw_ohlcv],
             partition_key=MultiPartitionKey({"ticker": "AAPL", "time": "2024-01-02"}),
@@ -100,7 +100,7 @@ def test_asset_materialization_synthetic(tmp_path):
         return synthetic_df
 
     with (
-        patch("lab.defs.assets.load_market_data", return_value=synthetic_df),
+        patch("lab.platform.dagster.assets.load_market_data", return_value=synthetic_df),
         patch("dagster_polars.PolarsParquetIOManager.load_input", side_effect=mock_load_input),
     ):
         result = materialize(

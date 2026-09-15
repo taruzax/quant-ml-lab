@@ -1,0 +1,8 @@
+paths:
+  artifacts_dir: "artifacts"
+  snapshot_dir: "data/snapshots"
+  mlflow_tracking_uri: "file:./data/mlflow"
+
+mlflow:
+  enabled: true
+  experiment_name: "quant-ml-lab"

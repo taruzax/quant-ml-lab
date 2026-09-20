@@ -1,77 +1,45 @@
-"""
-Each function returns a new dict (no mutation) with weights that sum to ~1.0.
-This is done intentionaly for debugging and logging
-"""
+"""Deterministic portfolio budget constraints."""
 
 from __future__ import annotations
 
-from lab.core.config import PipelineConfig
+import math
+from typing import Any
 
 
-def apply_long_only(weights):
-    """Safety function against negative weights"""
-    if min(weights.values()) >= 0.0:
-        if abs(sum(weights.values()) - 1.0) < 1e-6:
-            return weights.copy()
-    clipped = {k: max(v, 0.0) for k, v in weights.items()}
-    total = sum(clipped.values())
-    return {k: v / total for k, v in clipped.items()}
+def apply_long_only(weights: dict[str, float]) -> dict[str, float]:
+    """Remove invalid and non-positive proposed budgets without reinvesting cash."""
+    return {ticker: float(value) for ticker, value in sorted(weights.items()) if math.isfinite(value) and value > 0.0}
 
 
-def apply_min_position(weights, min_weight: float = 0.05):
-    """Zero out positions below min_weight"""
-    if min_weight <= 0:
-        return dict(weights)
-
-    surviving = {k: v for k, v in weights.items() if v >= min_weight}
-    if not surviving:
-        # all weights below threshold, return equal weight
-        return {k: 1.0 / len(weights) for k in weights}
-
-    total_surviving = sum(surviving.values())
-    return {k: (v / total_surviving if k in surviving else 0.0) for k, v in weights.items()}
+def apply_min_position(weights: dict[str, float], min_weight: float = 0.05) -> dict[str, float]:
+    """Drop positive budgets below the configured minimum."""
+    if min_weight < 0.0:
+        raise ValueError("min_weight must be nonnegative")
+    return {ticker: value for ticker, value in sorted(weights.items()) if value >= min_weight}
 
 
-def apply_max_position(weights, max_weight: float = 0.3):
-    """Cap weights at max_weight and redistribute"""
-    n = len(weights)
-    if n == 1:
-        return {k: 1.0 for k in weights}
-
-    if max_weight < 1.0 / n:
-        raise ValueError(f"max_weight={max_weight} < 1/{n}={1.0 / n:.4f}")
-
-    if max(weights.values()) <= max_weight + 1e-10:
-        return weights.copy()
-
-    items = sorted(weights.items(), key=lambda kv: kv[1], reverse=True)
-
-    capped = 0
-    remaining_budget = 1.0
-    remaining_sum = sum(weights.values())
-
-    for _, v in items:
-        if v * remaining_budget <= max_weight * remaining_sum + 1e-12:
-            break
-        capped += 1
-        remaining_budget -= max_weight
-        remaining_sum -= v
-
-    if remaining_sum <= 0:
-        return {k: 1.0 / n for k in weights}
-
-    scale = remaining_budget / remaining_sum
-    capped_keys = {k for k, _ in items[:capped]}
-
-    return {k: max_weight if k in capped_keys else v * scale for k, v in weights.items()}
+def apply_max_position(weights: dict[str, float], max_weight: float = 0.30) -> dict[str, float]:
+    """Cap each budget without scaling the remaining assets upward."""
+    if max_weight <= 0.0:
+        raise ValueError("max_weight must be positive")
+    return {ticker: min(float(value), max_weight) for ticker, value in sorted(weights.items())}
 
 
-def apply_all_constraints(weights: dict[str, float], config: PipelineConfig):
-    weights = apply_long_only(weights)
-    weights = apply_min_position(weights, min_weight=config.min_position_size)
-    weights = apply_max_position(weights, max_weight=config.max_position_size)
+def apply_all_constraints(weights: dict[str, float], config: Any) -> dict[str, float]:
+    """Apply positive filtering, cap, minimum drop, then gross-limit scaling."""
+    cleaned = apply_long_only(weights)
+    capped = apply_max_position(cleaned, float(config.max_position_size))
+    filtered = apply_min_position(capped, float(config.min_position_size))
+    total = sum(filtered.values())
+    gross_limit = float(config.gross_limit)
+    if total > gross_limit and total > 0.0:
+        scale = gross_limit / total
+        filtered = {ticker: value * scale for ticker, value in filtered.items()}
+    return filtered
 
-    total = sum(weights.values())
-    assert abs(total - 1.0) < 1e-6, f"Weights sum to {total}, expected ~1.0"
 
-    return weights
+def validate_budget(weights: dict[str, float], *, gross_limit: float, tolerance: float = 1e-9) -> None:
+    if any(not math.isfinite(value) or value < -tolerance for value in weights.values()):
+        raise ValueError("Budgets must be finite and nonnegative")
+    if sum(weights.values()) > gross_limit + tolerance:
+        raise ValueError("Budgets exceed the gross limit")

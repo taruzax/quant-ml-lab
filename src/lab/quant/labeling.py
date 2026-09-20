@@ -229,7 +229,7 @@ def triple_barrier_label(
         )
     processed_df = pl.concat(valid_dfs).sort([group_col, date_col])
 
-    if "volatility" not in processed_df.columns:
+    if "volatility_t_minus_1" not in processed_df.columns:
         processed_df = calculate_volatility(
             processed_df,
             vol_lookback_bars=config.vol_lookback_bars,
@@ -239,8 +239,8 @@ def triple_barrier_label(
         )
 
     processed_df = processed_df.with_columns(
-        (pl.col(price_col) * (1.0 + config.profit_taking * pl.col("volatility"))).alias("upper_barrier"),
-        (pl.col(price_col) * (1.0 - config.stop_loss * pl.col("volatility"))).alias("lower_barrier"),
+        (pl.col(price_col) * (1.0 + config.profit_taking * pl.col("volatility_t_minus_1"))).alias("upper_barrier"),
+        (pl.col(price_col) * (1.0 - config.stop_loss * pl.col("volatility_t_minus_1"))).alias("lower_barrier"),
         pl.col(date_col).alias("t0"),
     )
 

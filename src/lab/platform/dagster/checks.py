@@ -4,8 +4,9 @@ import pandera.polars as pa
 import polars as pl
 from dagster import AssetCheckResult, asset_check
 
+from lab.core.config import TIMEFRAME_CONSTANTS
 from lab.core.schemas import PRICE_COLUMNS
-from lab.platform.dagster.assets import features, ffd_features, raw_ohlcv, tensors, validated_data
+from lab.platform.dagster.assets import raw_ohlcv, validated_data
 from lab.platform.dagster.resources import PipelineConfigResource
 
 RawOHLCVSchema = pa.DataFrameSchema(
@@ -89,7 +90,8 @@ def raw_ohlcv_schema_check(raw_ohlcv: pl.DataFrame, config_py: PipelineConfigRes
     schema_result = _schema_result(RawOHLCVSchema, raw_ohlcv)
     if not schema_result.passed:
         return schema_result
-    return _gap_check(raw_ohlcv, config_py.to_pipeline_config().gap_tolerance)
+    config = config_py.to_pipeline_config()
+    return _gap_check(raw_ohlcv, TIMEFRAME_CONSTANTS[config.timeframe]["typical_gap_tolerance"])
 
 
 @asset_check(asset=validated_data)
@@ -100,18 +102,3 @@ def validated_data_schema_check(validated_data: pl.DataFrame) -> AssetCheckResul
 
     bad_prices = validated_data.filter(pl.any_horizontal([pl.col(col) <= 0 for col in PRICE_COLUMNS]))
     return AssetCheckResult(passed=bad_prices.is_empty(), metadata={"bad_price_rows": bad_prices.height})
-
-
-@asset_check(asset=features)
-def features_finite_check(features: pl.DataFrame) -> AssetCheckResult:
-    return _finite_columns_check(features)
-
-
-@asset_check(asset=ffd_features)
-def ffd_features_finite_check(ffd_features: pl.DataFrame) -> AssetCheckResult:
-    return _finite_columns_check(ffd_features)
-
-
-@asset_check(asset=tensors)
-def tensors_manifest_check(tensors: pl.DataFrame) -> AssetCheckResult:
-    return _schema_result(TensorsSchema, tensors)

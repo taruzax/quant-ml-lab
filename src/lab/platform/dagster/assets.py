@@ -180,3 +180,34 @@ def tensors(
             "targets": MetadataValue.int(len(target_cols)),
         },
     )
+
+
+@asset(group_name="research_pipeline", io_manager_key="fs_io_manager")
+def consolidated_snapshot(config_py: PipelineConfigResource):
+    """Load the canonical validated market snapshot used by research callers."""
+    from lab.platform.data_access import load_market_snapshot
+
+    return load_market_snapshot(_pipeline_config(config_py))
+
+
+@asset(group_name="research_pipeline", io_manager_key="fs_io_manager")
+def prepared_dataset(consolidated_snapshot, config_py: PipelineConfigResource):
+    """Prepare causal features, labels and split boundaries through the Python API."""
+    from lab.research.preprocessing import prepare_dataset
+
+    return prepare_dataset(_pipeline_config(config_py), snapshot=consolidated_snapshot)
+
+
+@asset(group_name="research_pipeline", io_manager_key="fs_io_manager")
+def development_run(prepared_dataset, config_py: PipelineConfigResource):
+    """Run development folds and return an immutable local run reference."""
+    from lab.research.experiment import run_experiment
+
+    result = run_experiment(_pipeline_config(config_py), dataset=prepared_dataset)
+    return result.ref.model_dump(mode="json")
+
+
+@asset(group_name="research_pipeline", io_manager_key="fs_io_manager")
+def portfolio_evaluation(development_run):
+    """Expose saved development allocation/evaluation artifact references."""
+    return {"run_id": development_run["run_id"], "status": "completed", "source": "shared_research_api"}

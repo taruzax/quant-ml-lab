@@ -1,7 +1,7 @@
 paths:
   artifacts_dir: "artifacts"
   snapshot_dir: "data/snapshots"
-  mlflow_tracking_uri: "file:./data/mlflow"
+  mlflow_tracking_uri: "sqlite:///data/mlflow/mlflow.db"
 
 mlflow:
   enabled: true

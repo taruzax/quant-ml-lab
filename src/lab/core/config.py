@@ -147,6 +147,8 @@ class ModelsConfig(StrictModel):
     device: Literal["cpu", "cuda"] = "cpu"
     seed: int = 42
     early_stopping: bool = False
+    early_stopping_fraction: float = Field(default=0.20, gt=0.0, lt=1.0)
+    early_stopping_patience: PositiveInt = 5
 
 
 class AllocationConfig(StrictModel):
@@ -187,7 +189,7 @@ class CampaignConfig(StrictModel):
 class PlatformPathsConfig(StrictModel):
     artifacts_dir: Path = Path("artifacts")
     snapshot_dir: Path = Path("data/snapshots")
-    mlflow_tracking_uri: str = "file:./data/mlflow"
+    mlflow_tracking_uri: str = "sqlite:///data/mlflow/mlflow.db"
 
 
 class MLflowConfig(StrictModel):
@@ -220,7 +222,8 @@ CANONICAL_SECTIONS = {
 }
 
 
-def _read_yaml(path: Path) -> dict[str, Any]:
+def _read_yaml(path: str | Path) -> dict[str, Any]:
+    path = Path(path)
     if not path.exists():
         return {}
     raw = yaml.safe_load(path.read_text()) or {}
@@ -325,7 +328,7 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return result
 
 
-def _load_yaml_defaults(path: Path = PIPELINE_CONFIG_PATH) -> dict[str, Any]:
+def _load_yaml_defaults(path: str | Path = PIPELINE_CONFIG_PATH) -> dict[str, Any]:
     """Load nested YAML settings, translating legacy sections explicitly."""
     return _translate_yaml(_read_yaml(path))
 
@@ -371,7 +374,7 @@ class PipelineConfig(BaseSettings):
         super().__init__(**_translate_yaml(data))
 
     @classmethod
-    def from_yaml(cls, path: Path = PIPELINE_CONFIG_PATH, overrides: dict[str, Any] | None = None) -> "PipelineConfig":
+    def from_yaml(cls, path: str | Path = PIPELINE_CONFIG_PATH, overrides: dict[str, Any] | None = None) -> "PipelineConfig":
         values = _load_yaml_defaults(path)
         if overrides:
             values = _deep_merge(values, _translate_yaml(overrides))

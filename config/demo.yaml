@@ -1,0 +1,33 @@
+data:
+  source: bundled_demo
+  input_path: data/demo/ohlcv.csv
+  metadata_path: data/demo/metadata.yaml
+  timeframe: 1d
+
+features:
+  return_lags: [1, 5]
+  target_horizons: [1, 5]
+
+tensor:
+  sequence_len: 20
+
+models:
+  baseline:
+    enabled: true
+    params: {}
+  xgboost:
+    enabled: true
+    params:
+      n_estimators: 8
+      max_depth: 2
+      learning_rate: 0.05
+      subsample: 1.0
+      colsample_bytree: 1.0
+  gru:
+    enabled: false
+  lstm:
+    enabled: false
+
+allocation:
+  method: equal_weight
+  lookback_bars: 100

@@ -201,11 +201,15 @@ class AllocationFrame(ContractModel):
     decision_time: datetime
     valid_from: datetime
     ticker_budgets: dict[str, float]
+    unconstrained_budgets: dict[str, float] = Field(default_factory=dict)
     eligibility: dict[str, str] = Field(default_factory=dict)
     exclusions: dict[str, str] = Field(default_factory=dict)
     covariance_reference: str | None = None
     history_reference: str | None = None
     config_hash: str
+    cash_capacity: float = 1.0
+    turnover: float = 0.0
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
 
 
 class BacktestResult(ContractModel):
@@ -257,4 +261,5 @@ class RunResult(ContractModel):
     allocations: tuple[AllocationFrame, ...] = ()
     metrics: tuple[MetricResult, ...] = ()
     backtest: BacktestResult | None = None
+    snapshot: MarketSnapshot | None = None
     artifact_manifest: dict[str, Any] = Field(default_factory=dict)

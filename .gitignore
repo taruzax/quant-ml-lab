@@ -8,7 +8,8 @@ log.md
 .env
 .vscode
 /earning_calls_ONHOLD
-*notebooks
+/notebooks/*
+!notebooks/research_walkthrough.ipynb
 # local data files
 *.parquet
 *.jsonl
@@ -18,3 +19,9 @@ log.md
 *_cache
 *.tmp*
 *.db
+artifacts/
+data/mlflow/
+data/dagster/
+checkpoints/
+*.html
+*mlruns

@@ -5,15 +5,15 @@ import numpy as np
 import polars as pl
 
 from lab.core.config import PipelineConfig
-from lab.core.contracts import FoldBundle, PreprocessingState, PreparedDataset
+from lab.core.contracts import FoldBundle, MarketSnapshot, PreparedDataset, PreprocessingState
 from lab.core.schemas import validate_feature_names
 from lab.platform.data_access import load_market_snapshot
+from lab.quant.cv import fold_training_labels, scoreable_labels
 from lab.quant.features import apply_all_features, feature_specification
 from lab.quant.ffd import find_min_d, frac_diff_ffd, get_weights_ffd
 from lab.quant.labeling import compute_labels
 from lab.research.dataset import build_sample_set
 from lab.research.splits import build_split_plan
-from lab.quant.cv import fold_training_labels, scoreable_labels
 
 
 @dataclass
@@ -160,9 +160,9 @@ def fit_preprocessor(
     return FoldPreprocessor(state=state)
 
 
-def prepare_dataset(config: PipelineConfig) -> PreparedDataset:
+def prepare_dataset(config: PipelineConfig, snapshot: MarketSnapshot | None = None) -> PreparedDataset:
     """Load one snapshot and produce causal features, labels, and split plan."""
-    snapshot = load_market_snapshot(config)
+    snapshot = snapshot if snapshot is not None else load_market_snapshot(config)
     feature_frame = apply_all_features(snapshot.bars, config)
     feature_columns = feature_specification(feature_frame, config)
     label_result = compute_labels(snapshot, config.task)
@@ -195,14 +195,8 @@ def prepare_fold(dataset: PreparedDataset, fold_spec) -> FoldBundle:
         fold_spec.validation_start,
         fold_spec.validation_end,
     )
-    train_allowed = {
-        (row["ticker"], row["decision_time"])
-        for row in train_labels.to_dicts()
-    }
-    evaluation_allowed = {
-        (row["ticker"], row["decision_time"])
-        for row in evaluation_labels.to_dicts()
-    }
+    train_allowed = {(row["ticker"], row["decision_time"]) for row in train_labels.to_dicts()}
+    evaluation_allowed = {(row["ticker"], row["decision_time"]) for row in evaluation_labels.to_dicts()}
     target_name = "target_1b_v2" if "target_1b_v2" in dataset.labels.columns else "label"
     train_samples = build_sample_set(
         transformed,

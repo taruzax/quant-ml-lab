@@ -57,36 +57,42 @@ splits:
 models:
   device: "cpu"
   seed: 42
-  early_stopping: false
+  early_stopping: true
   early_stopping_fraction: 0.20
-  early_stopping_patience: 5
+  early_stopping_patience: 3
   baseline:
     enabled: true
     params: {}
+  
+  # XGBOOST PARAMS
   xgboost:
     enabled: true
     params:
-      n_estimators: 200
-      max_depth: 3
-      learning_rate: 0.05
-      subsample: 1.0
+      n_estimators: 300
+      max_depth: 2
+      learning_rate: 0.03
+      subsample: 0.8
       colsample_bytree: 1.0
+  
+  # GRU PARAMS
   gru:
     enabled: false
     params:
       hidden_size: 32
       num_layers: 1
       learning_rate: 0.001
-      epochs: 20
-      batch_size: 32
+      epochs: 10
+      batch_size: 256
+  
+  # LSTM PARAMS
   lstm:
-    enabled: false
+    enabled: true
     params:
       hidden_size: 32
       num_layers: 1
       learning_rate: 0.001
-      epochs: 20
-      batch_size: 32
+      epochs: 10
+      batch_size: 256
 
 allocation:
   method: "equal_weight"

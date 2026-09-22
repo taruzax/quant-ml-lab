@@ -69,6 +69,7 @@ def _target_orders(
         (row["bar_open_time"] if "bar_open_time" in row else row["timestamp"], row["ticker"]): float(row["open"])
         for row in bars.to_dicts()
     }
+    last_known_price: dict[str, float] = {}
     for timestamp, prices in close.iterrows():
         close_marks = {ticker: float(prices[ticker]) for ticker in tickers if np.isfinite(prices[ticker])}
         allocation = allocation_by_open.get(timestamp.to_pydatetime())
@@ -81,9 +82,17 @@ def _target_orders(
             and np.isfinite(price) and price > 0.0
         }
         missing_held = [ticker for ticker in tickers if quantities[ticker] != 0.0 and ticker not in execution_open]
-        if missing_held:
-            raise ValueError(f"Held positions lack executable open prices at {timestamp}: {missing_held}")
+        for ticker in missing_held:
+            if ticker in last_known_price:
+                execution_open[ticker] = last_known_price[ticker]
+            else:
+                raise ValueError(f"Held position {ticker} lacks both executable open and last known price at {timestamp}")
+
         equity = cash + sum(quantities[ticker] * execution_open[ticker] for ticker in tickers if ticker in execution_open)
+
+        # Update last known price for the next bar
+        for ticker, price in close_marks.items():
+            last_known_price[ticker] = price
         if equity <= 0.0:
             raise ValueError("Portfolio equity is nonpositive at an executable open")
         gross_open = sum(abs(quantities[ticker] * execution_open[ticker]) for ticker in tickers if ticker in execution_open)
@@ -157,24 +166,36 @@ def _target_orders(
                     target_quantities[ticker] = current + (target - current) * entry_scale
                 if current == 0.0 and 0.0 < abs(target_quantities[ticker] * execution_open[ticker]) / equity < float(latest_policy["min_position_size"]):
                     target_quantities[ticker] = 0.0
-            ordered_tickers = sorted(
-                target_quantities,
-                key=lambda ticker: (
-                    not (
-                        abs(target_quantities[ticker]) < abs(quantities[ticker])
-                        or np.sign(target_quantities[ticker]) != np.sign(quantities[ticker])
-                    ),
-                    ticker,
+            ordered_orders = sorted(
+                (
+                    (target_quantities[ticker] - quantities[ticker], ticker, target_quantities[ticker])
+                    for ticker in target_quantities
                 ),
+                key=lambda order: (order[0] >= 0.0, order[1]),
             )
-            for ticker in ordered_tickers:
-                target_quantity = target_quantities[ticker]
-                delta = target_quantity - quantities[ticker]
+            for delta, ticker, target_quantity in ordered_orders:
                 if abs(delta) <= 1e-12:
                     continue
                 execution_price = execution_open[ticker]
+                if delta > 0.0:
+                    cash_scale = max(abs(float(backtest_config.initial_capital)), abs(cash), 1.0)
+                    cash_reserve = 8.0 * np.finfo(float).eps * cash_scale
+                    affordable = max(0.0, cash - cash_reserve) / (execution_price * (1.0 + fee_rate))
+                    delta = min(delta, affordable)
+                    if delta <= 1e-12:
+                        continue
+                    target_quantity = quantities[ticker] + delta
                 fee = abs(delta * execution_price) * fee_rate
                 cash -= delta * execution_price + fee
+                cash_tolerance = 1e-12 * max(abs(float(backtest_config.initial_capital)), abs(delta * execution_price), 1.0)
+                if cash < -cash_tolerance:
+                    raise ValueError(
+                        f"Order planning produced materially negative cash at {timestamp}: "
+                        f"ticker={ticker}, side={'buy' if delta > 0 else 'sell'}, "
+                        f"quantity={delta:.12g}, cash={cash:.12g}, tolerance={cash_tolerance:.12g}"
+                    )
+                if cash < 0.0:
+                    cash = 0.0
                 previous_quantity = quantities[ticker]
                 quantities[ticker] = target_quantity
                 if ticker in pending_exits:
@@ -235,6 +256,15 @@ def _target_orders(
                 execution_price = execution_open[ticker]
                 fee = abs(delta * execution_price) * fee_rate
                 cash -= delta * execution_price + fee
+                cash_tolerance = 1e-12 * max(abs(float(backtest_config.initial_capital)), abs(delta * execution_price), 1.0)
+                if cash < -cash_tolerance:
+                    raise ValueError(
+                        f"Terminal liquidation produced materially negative cash at {timestamp}: "
+                        f"ticker={ticker}, side={'buy' if delta > 0 else 'sell'}, "
+                        f"quantity={delta:.12g}, cash={cash:.12g}, tolerance={cash_tolerance:.12g}"
+                    )
+                if cash < 0.0:
+                    cash = 0.0
                 quantities[ticker] = 0.0
                 order_rows.append(
                     {
@@ -334,16 +364,70 @@ def simulate_strategy(
     gross_pf = _run_vectorbt(close, gross_orders, backtest_config, fee_rate=0.0)
     net_pf = _run_vectorbt(close, orders, backtest_config, fee_rate=fee_rate)
     actual_records = net_pf.orders.records_readable
-    if len(actual_records) != len(orders):
-        raise ValueError("VectorBT did not fill every requested order")
-    for request, actual in zip(orders.itertuples(index=False), actual_records.itertuples(index=False)):
-        executed_quantity = float(actual.Size) * (1.0 if actual.Side == "Buy" else -1.0)
-        if request.ticker != actual.Column or request.timestamp != actual.Timestamp or not np.isclose(request.quantity, executed_quantity, atol=1e-9):
-            raise ValueError("VectorBT execution differs from the requested order sequence")
+    quantity_rtol = 1e-9
+    quantity_atol = 1e-9
+    notional_rtol = 1e-9
+    notional_atol = 1e-8
+
+    def normalized_timestamp(value: Any) -> pd.Timestamp:
+        timestamp = pd.Timestamp(value)
+        return timestamp.tz_localize("UTC") if timestamp.tzinfo is None else timestamp.tz_convert("UTC")
+
+    requested_by_identity: dict[tuple[pd.Timestamp, str, str], list[int]] = {}
+    for order_index, request in enumerate(orders.itertuples(index=False)):
+        identity = (normalized_timestamp(request.timestamp), str(request.ticker), request.side.lower())
+        requested_by_identity.setdefault(identity, []).append(order_index)
+    matched_records: list[Any | None] = [None] * len(orders)
+    for actual_index, actual in enumerate(actual_records.itertuples(index=False)):
+        side = str(actual.Side).lower()
+        identity = (normalized_timestamp(actual.Timestamp), str(actual.Column), side)
+        matches = requested_by_identity.get(identity, [])
+        if not matches:
+            raise ValueError(
+                f"VectorBT returned an unmatched order at order index={actual_index}: "
+                f"timestamp={normalized_timestamp(actual.Timestamp)}, ticker={actual.Column}, "
+                f"side={actual.Side}, requested quantity=0, executed quantity={float(actual.Size):.12g}, "
+                f"absolute difference={abs(float(actual.Size)):.12g}, relative difference=inf, "
+                f"requested notional=0, executed notional={abs(float(actual.Size) * float(actual.Price)):.12g}, "
+                f"quantity tolerance=atol {quantity_atol:g} + rtol {quantity_rtol:g}"
+            )
+        matched_records[matches.pop(0)] = actual
+    if len(actual_records) != len(orders) or any(actual is None for actual in matched_records):
+        missing_index = next((index for index, actual in enumerate(matched_records) if actual is None), None)
+        if missing_index is None:
+            raise ValueError(f"VectorBT executed {len(actual_records)} orders for {len(orders)} requested orders")
+        request = orders.iloc[missing_index]
+        raise ValueError(
+            f"VectorBT omitted order index={missing_index}, timestamp={request['timestamp']}, "
+            f"ticker={request['ticker']}, side={request['side']}, requested quantity={request['quantity']:.12g}, "
+            f"executed quantity=0, absolute difference={abs(float(request['quantity'])):.12g}, "
+            f"relative difference=1, requested notional={abs(float(request['quantity'] * request['price'])):.12g}, "
+            f"executed notional=0, quantity tolerance=atol {quantity_atol:g} + rtol {quantity_rtol:g}"
+        )
+    for order_index, (request, actual) in enumerate(zip(orders.itertuples(index=False), matched_records)):
+        executed_quantity = float(actual.Size) * (1.0 if str(actual.Side).lower() == "buy" else -1.0)
+        requested_notional = abs(float(request.quantity) * float(request.price))
+        executed_notional = abs(float(actual.Size) * float(actual.Price))
+        quantity_difference = abs(float(request.quantity) - executed_quantity)
+        relative_quantity_difference = quantity_difference / max(abs(float(request.quantity)), quantity_atol)
+        notional_difference = abs(requested_notional - executed_notional)
+        quantity_matches = np.isclose(request.quantity, executed_quantity, rtol=quantity_rtol, atol=quantity_atol)
+        notional_matches = np.isclose(requested_notional, executed_notional, rtol=notional_rtol, atol=notional_atol)
+        if not quantity_matches or not notional_matches:
+            mismatch = "quantity" if not quantity_matches else "notional"
+            raise ValueError(
+                f"VectorBT {mismatch} reconciliation failed for order index={order_index}, "
+                f"timestamp={normalized_timestamp(request.timestamp)}, ticker={request.ticker}, side={request.side}: "
+                f"requested quantity={request.quantity:.12g}, executed quantity={executed_quantity:.12g}, "
+                f"absolute difference={quantity_difference:.12g}, relative difference={relative_quantity_difference:.12g}, "
+                f"requested notional={requested_notional:.12g}, executed notional={executed_notional:.12g}, "
+                f"quantity tolerance=atol {quantity_atol:g} + rtol {quantity_rtol:g}, "
+                f"notional tolerance=atol {notional_atol:g} + rtol {notional_rtol:g}"
+            )
     orders = orders.copy()
     if not orders.empty:
-        orders["price"] = actual_records["Price"].to_numpy(dtype=float)
-        orders["fees"] = actual_records["Fees"].to_numpy(dtype=float)
+        orders["price"] = [float(actual.Price) for actual in matched_records]
+        orders["fees"] = [float(actual.Fees) for actual in matched_records]
     values = pd.Series(net_pf.value(), index=close.index, name="equity")
     gross_values = pd.Series(gross_pf.value(), index=close.index, name="equity")
     equity = pl.DataFrame({"timestamp": list(values.index.to_pydatetime()), "equity": values.to_numpy(), "gross_equity": gross_values.to_numpy()})

@@ -32,10 +32,10 @@ ffd:
 tensor:
   sequence_len: 60
   batch_size: 32
-  train_cutoff_date: null
+  train_cutoff_date: "2025-11-20"  # Avoids the Black Friday half-day missing bars
 
 task:
-  kind: "regression"
+  kind: "classification"
   triple_barrier:
     profit_taking: 2.0
     stop_loss: 2.0
@@ -86,7 +86,7 @@ models:
   
   # LSTM PARAMS
   lstm:
-    enabled: true
+    enabled: false
     params:
       hidden_size: 32
       num_layers: 1

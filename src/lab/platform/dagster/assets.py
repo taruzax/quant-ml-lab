@@ -1,8 +1,12 @@
+"""Active ingestion asset plus deprecated, unregistered research assets for compatibility."""
+
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
+from typing import Any
 
 import polars as pl
 from dagster import (
+    AssetCheckResult,
     AssetExecutionContext,
     AssetIn,
     AutomationCondition,
@@ -15,11 +19,14 @@ from dagster import (
     MultiPartitionsDefinition,
     TimeWindowPartitionMapping,
     asset,
+    asset_check,
 )
 
-from lab.core.config import PipelineConfig
+from lab.core.config import IngestionConfig, PipelineConfig, Timeframe, get_platform_config
 from lab.core.schemas import target_col
 from lab.platform.data_access import load_market_data
+from lab.platform.ingestion import IngestionService
+from lab.platform.market_store import ProviderBatchStore, SnapshotCatalog
 from lab.platform.dagster.resources import PipelineConfigResource
 from lab.quant.features import apply_all_features
 from lab.quant.ffd import find_global_d, frac_diff_polars
@@ -27,6 +34,52 @@ from lab.quant.validators import run_all_validations
 from lab.research.samples import TimeSeriesDataset
 
 DATA_PIPELINE_GROUP = "data_pipeline"
+
+
+def create_ingestion_service(config_py: PipelineConfigResource) -> IngestionService:
+    platform = get_platform_config()
+    return IngestionService(
+        batch_store=ProviderBatchStore(platform.paths.snapshot_dir.parent / "market_batches"),
+        catalog=SnapshotCatalog(platform.paths.snapshot_dir),
+    )
+
+
+@asset(group_name="market_data")
+def ingestion_publication(context: AssetExecutionContext, config_py: PipelineConfigResource) -> dict[str, list[dict[str, Any]]]:
+    """Ingest one configured stream and publish its immutable snapshot when coverage permits."""
+    ingestion_config = IngestionConfig.from_yaml(config_py.ingestion_config_path)
+    matching = [stream for stream in ingestion_config.streams if stream.enabled]
+    if config_py.ingestion_timeframe is not None:
+        selected_timeframe = Timeframe(config_py.ingestion_timeframe)
+        matching = [stream for stream in matching if stream.timeframe == selected_timeframe]
+    if config_py.ingestion_stream_name is not None:
+        matching = [stream for stream in matching if stream.name == config_py.ingestion_stream_name]
+    service = create_ingestion_service(config_py)
+    results = [(stream.gap_policy, service.execute(stream)) for stream in matching]
+    metadata = {
+        "stream_count": MetadataValue.int(len(results)),
+        "attempts": MetadataValue.json([item.model_dump(mode="json") for _, item in results]),
+        "failed_count": MetadataValue.int(sum(item.status == "failed" for _, item in results)),
+        "published_snapshot_ids": MetadataValue.json([item.snapshot_id for _, item in results if item.snapshot_id]),
+    }
+    if not results:
+        metadata["status"] = MetadataValue.text("noop: no enabled streams matched selection")
+    context.add_output_metadata(metadata)
+    return {"attempts": [{"gap_policy": policy, **item.model_dump(mode="json")} for policy, item in results]}
+
+
+@asset_check(asset=ingestion_publication, name="ingestion_calendar_coverage", blocking=False)
+def ingestion_calendar_coverage(ingestion_publication: dict[str, list[dict[str, Any]]]) -> AssetCheckResult:
+    """Flag failed ingestion and incomplete recorded coverage without blocking snapshot history."""
+    failures = [
+        {"stream_id": item["stream_id"], "status": item["status"], "missing_rows": item["missing_rows"], "error": item.get("error")}
+        for item in ingestion_publication.get("attempts", [])
+        if item["status"] == "failed" or (item["gap_policy"] == "record" and item["missing_rows"] > 0)
+    ]
+    return AssetCheckResult(
+        passed=not failures,
+        metadata={"coverage_failures": MetadataValue.json(failures), "checked_stream_count": len(ingestion_publication.get("attempts", []))},
+    )
 
 ticker_partitions = DynamicPartitionsDefinition(name="tickers")
 time_window_partitions = DailyPartitionsDefinition(start_date="2020-01-01")

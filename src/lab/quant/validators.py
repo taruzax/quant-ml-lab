@@ -1,4 +1,5 @@
 import polars as pl
+from typing import Any
 
 # pyrefly: ignore [missing-import]
 from lab.core.config import PipelineConfig
@@ -158,3 +159,40 @@ def validate_explicit_bar_times(df: pl.DataFrame, *, calendar: str, timeframe) -
         except ValueError as exc:
             raise DataValidationError(str(exc)) from exc
     return df
+
+
+def compare_bar_coverage(
+    expected: pl.DataFrame,
+    observed: pl.DataFrame,
+    *,
+    tickers: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    """Classify missing, unexpected, duplicate, and valid calendar bars."""
+    expected_columns = {"session_id", "bar_open_time", "bar_close_time"}
+    if not expected_columns.issubset(expected.columns):
+        raise DataValidationError(f"Expected coverage keys are missing: {sorted(expected_columns - set(expected.columns))}")
+    observed_columns = expected_columns | {"ticker"}
+    if not observed_columns.issubset(observed.columns):
+        raise DataValidationError(f"Observed coverage keys are missing: {sorted(observed_columns - set(observed.columns))}")
+    selected_tickers = tuple(tickers or sorted(observed["ticker"].unique().to_list()))
+    expected_keys = expected.select(sorted(expected_columns))
+    expected_with_ticker = pl.concat(
+        [expected_keys.with_columns(pl.lit(ticker).alias("ticker")) for ticker in selected_tickers],
+        how="vertical",
+    ) if selected_tickers else expected_keys.with_columns(pl.lit(None, dtype=pl.Utf8).alias("ticker"))
+    observed_keys = observed.select(sorted(observed_columns))
+    duplicates = observed_keys.group_by(sorted(observed_columns)).len().filter(pl.col("len") > 1)
+    distinct_observed = observed_keys.unique(subset=sorted(observed_columns))
+    missing = expected_with_ticker.join(distinct_observed, on=sorted(observed_columns), how="anti")
+    unexpected = distinct_observed.join(expected_with_ticker, on=sorted(observed_columns), how="anti")
+    valid = expected_with_ticker.join(distinct_observed, on=sorted(observed_columns), how="inner")
+    return {
+        "missing": missing,
+        "unexpected": unexpected,
+        "duplicates": duplicates,
+        "valid": valid,
+        "missing_count": missing.height,
+        "unexpected_count": unexpected.height,
+        "duplicate_count": duplicates.height,
+        "valid_count": valid.height,
+    }

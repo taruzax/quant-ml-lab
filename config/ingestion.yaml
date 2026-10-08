@@ -1,0 +1,21 @@
+streams:
+  - name: equities-daily
+    provider: yfinance
+    tickers: [AAPL, MSFT, NVDA]
+    calendar: XNYS
+    timeframe: 1d
+    start_boundary: "2020-01-01"
+    refresh_overlap_bars: 2
+    completion_delay_minutes: 30
+    enabled: true
+    gap_policy: reject
+  - name: equities-hourly
+    provider: yfinance
+    tickers: [AAPL, MSFT, NVDA]
+    calendar: XNYS
+    timeframe: 1h
+    start_boundary: "2025-01-01T00:00:00+00:00"
+    refresh_overlap_bars: 3
+    completion_delay_minutes: 20
+    enabled: true
+    gap_policy: record

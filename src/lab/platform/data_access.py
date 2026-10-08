@@ -11,8 +11,9 @@ import polars as pl
 import yaml
 import yfinance as yf
 
-from lab.core.config import PipelineConfig, Timeframe
+from lab.core.config import PipelineConfig, Timeframe, get_platform_config
 from lab.core.contracts import MarketSnapshot
+from lab.platform.market_store import SnapshotCatalog
 from lab.quant.timing import as_utc, normalize_explicit_bar_times, normalize_provider_timestamp
 from lab.quant.validators import DataValidationError, validate_canonical_bars
 
@@ -389,6 +390,17 @@ def load_market_snapshot(config: PipelineConfig) -> MarketSnapshot:
         if config.data.input_path is None:
             raise ValueError("data.input_path is required when data.source='local'")
         input_path = config.data.input_path
+    elif source == "snapshot":
+        if config.data.snapshot_id is None:
+            raise ValueError("data.snapshot_id is required when data.source='snapshot'")
+        snapshot = SnapshotCatalog(get_platform_config().paths.snapshot_dir).load(config.data.snapshot_id)
+        if snapshot.calendar != config.data.calendar or snapshot.timeframe != config.data.timeframe:
+            raise ValueError(
+                "Saved snapshot calendar/timeframe does not match the research configuration: "
+                f"snapshot=({snapshot.calendar}, {snapshot.timeframe.value}), "
+                f"config=({config.data.calendar}, {config.data.timeframe.value})"
+            )
+        return snapshot
     else:
         tickers = load_tickers(config.data.ticker_config_path)
         frame = load_market_data(tickers, config.ingestion_interval, config.data.ingestion_start)

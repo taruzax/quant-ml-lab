@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from dagster import ConfigurableResource
 from pydantic import Field
@@ -12,9 +13,12 @@ class PipelineConfigResource(ConfigurableResource):
     """Dagster resource that resolves the same canonical Pydantic config as Python callers."""
 
     config_path: str = "config/pipeline.yaml"
-    overrides: dict[str, object] = Field(default_factory=dict)
+    overrides: dict[str, Any] = Field(default_factory=dict)
     timeframe: str | None = None
     sequence_len: int | None = None
+    ingestion_config_path: str = "config/ingestion.yaml"
+    ingestion_timeframe: str | None = None
+    ingestion_stream_name: str | None = None
 
     def to_pipeline_config(self) -> PipelineConfig:
         overrides = dict(self.overrides)

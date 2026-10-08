@@ -1,8 +1,9 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 import exchange_calendars as xcals
 import pandas as pd
+import polars as pl
 
 from lab.core.config import Timeframe
 
@@ -95,3 +96,33 @@ def normalize_explicit_bar_times(
             f"calendar={calendar_name}, timeframe={timeframe.value}"
         )
     return open_time, close_time, session.strftime("%Y-%m-%d")
+
+
+def expected_bar_keys(
+    calendar_name: str,
+    timeframe: Timeframe,
+    start: datetime | str | pd.Timestamp,
+    end: datetime | str | pd.Timestamp,
+    *,
+    completion_delay: timedelta = timedelta(0),
+    now: datetime | None = None,
+) -> pl.DataFrame:
+    """Generate completed exchange bars for a closed interval."""
+    start_time = as_utc(start, timezone_name="UTC")
+    end_time = as_utc(end, timezone_name="UTC")
+    if end_time < start_time:
+        raise ValueError("Expected-bar interval must be ordered")
+    cutoff = as_utc(now or datetime.now(timezone.utc), timezone_name="UTC") - completion_delay
+    calendar = get_exchange_calendar(calendar_name)
+    sessions = calendar.sessions_in_range(pd.Timestamp(start_time.date()), pd.Timestamp(end_time.date()))
+    rows: list[dict[str, object]] = []
+    for session in sessions:
+        for opened, closed, session_id in bar_times_for_session(calendar_name, session, timeframe):
+            if opened < start_time or closed > end_time or closed > cutoff:
+                continue
+            rows.append({"session_id": session_id, "bar_open_time": opened, "bar_close_time": closed})
+    return pl.DataFrame(rows, schema={
+        "session_id": pl.Utf8,
+        "bar_open_time": pl.Datetime("us", "UTC"),
+        "bar_close_time": pl.Datetime("us", "UTC"),
+    })

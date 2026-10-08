@@ -17,7 +17,6 @@ import polars as pl
 from lab.core.contracts import IngestionAttemptSummary, MarketSnapshot, SnapshotCatalogEntry
 from lab.platform.artifacts import canonical_json_bytes, sha256_file
 
-
 _IDENTITY_COLUMNS = ("ticker", "timestamp")
 
 
@@ -228,7 +227,10 @@ class SnapshotCatalog:
                 raise ValueError(f"Snapshot manifest checksum mismatch: {snapshot.snapshot_id}")
             if hashlib.sha256(bars_path.read_bytes()).hexdigest() != existing.get("bars_sha256"):
                 raise ValueError(f"Snapshot bars checksum mismatch: {snapshot.snapshot_id}")
-            if existing.get("snapshot_hash") != snapshot.snapshot_hash or existing.get("bars_sha256") != hashlib.sha256(bars_bytes).hexdigest():
+            if (
+                existing.get("snapshot_hash") != snapshot.snapshot_hash
+                or existing.get("bars_sha256") != hashlib.sha256(bars_bytes).hexdigest()
+            ):
                 raise ValueError(f"Snapshot identity collision with different content: {snapshot.snapshot_id}")
             entry = SnapshotCatalogEntry.model_validate({key: existing[key] for key in SnapshotCatalogEntry.model_fields})
             self._index(entry)
@@ -277,7 +279,10 @@ class SnapshotCatalog:
                     raise ValueError(f"Snapshot manifest checksum mismatch: {snapshot.snapshot_id}")
                 if hashlib.sha256(bars_path.read_bytes()).hexdigest() != existing.get("bars_sha256"):
                     raise ValueError(f"Snapshot bars checksum mismatch: {snapshot.snapshot_id}")
-                if existing.get("snapshot_hash") != snapshot.snapshot_hash or existing.get("bars_sha256") != hashlib.sha256(bars_bytes).hexdigest():
+                if (
+                    existing.get("snapshot_hash") != snapshot.snapshot_hash
+                    or existing.get("bars_sha256") != hashlib.sha256(bars_bytes).hexdigest()
+                ):
                     raise ValueError(f"Snapshot identity collision with different content: {snapshot.snapshot_id}")
                 entry = SnapshotCatalogEntry.model_validate({key: existing[key] for key in SnapshotCatalogEntry.model_fields})
             self._index(entry)
@@ -291,10 +296,20 @@ class SnapshotCatalog:
             self.connection.execute(
                 "INSERT INTO snapshots VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(snapshot_id) DO NOTHING",
                 (
-                    entry.snapshot_id, entry.snapshot_hash, entry.stream_id, entry.provider, entry.calendar,
-                    entry.timeframe.value, json.dumps(entry.ticker_order), entry.first_completed_bar.isoformat(),
-                    entry.last_completed_bar.isoformat(), entry.published_at.isoformat(), entry.coverage_status,
-                    json.dumps(entry.batch_ids), entry.bundle_path, entry.manifest_checksum,
+                    entry.snapshot_id,
+                    entry.snapshot_hash,
+                    entry.stream_id,
+                    entry.provider,
+                    entry.calendar,
+                    entry.timeframe.value,
+                    json.dumps(entry.ticker_order),
+                    entry.first_completed_bar.isoformat(),
+                    entry.last_completed_bar.isoformat(),
+                    entry.published_at.isoformat(),
+                    entry.coverage_status,
+                    json.dumps(entry.batch_ids),
+                    entry.bundle_path,
+                    entry.manifest_checksum,
                 ),
             )
 
@@ -306,10 +321,20 @@ class SnapshotCatalog:
         if row is None:
             raise KeyError(f"Unknown snapshot: {snapshot_id}")
         entry = SnapshotCatalogEntry(
-            snapshot_id=row[0], snapshot_hash=row[1], stream_id=row[2], provider=row[3], calendar=row[4],
-            timeframe=row[5], ticker_order=tuple(json.loads(row[6])), first_completed_bar=datetime.fromisoformat(row[7]),
-            last_completed_bar=datetime.fromisoformat(row[8]), published_at=datetime.fromisoformat(row[9]),
-            coverage_status=row[10], batch_ids=tuple(json.loads(row[11])), bundle_path=row[12], manifest_checksum=row[13],
+            snapshot_id=row[0],
+            snapshot_hash=row[1],
+            stream_id=row[2],
+            provider=row[3],
+            calendar=row[4],
+            timeframe=row[5],
+            ticker_order=tuple(json.loads(row[6])),
+            first_completed_bar=datetime.fromisoformat(row[7]),
+            last_completed_bar=datetime.fromisoformat(row[8]),
+            published_at=datetime.fromisoformat(row[9]),
+            coverage_status=row[10],
+            batch_ids=tuple(json.loads(row[11])),
+            bundle_path=row[12],
+            manifest_checksum=row[13],
         )
         self.verify(entry)
         return entry
@@ -341,21 +366,35 @@ class SnapshotCatalog:
 
     def latest_accepted(self, stream_id: str | None = None) -> SnapshotCatalogEntry | None:
         accepted = [entry for entry in self.list(coverage_status="accepted") if stream_id is None or entry.stream_id == stream_id]
-        return max(accepted, key=lambda entry: (entry.last_completed_bar, entry.published_at, entry.snapshot_id)) if accepted else None
+        return (
+            max(accepted, key=lambda entry: (entry.last_completed_bar, entry.published_at, entry.snapshot_id))
+            if accepted
+            else None
+        )
 
     def record_attempt(self, summary: IngestionAttemptSummary) -> None:
         payload = summary.model_dump_json()
         with self.connection:
             self.connection.execute(
                 "INSERT INTO ingestion_attempts(attempt_id, stream_id, status, finished_at, payload_json) VALUES (?, ?, ?, ?, ?)",
-                (summary.attempt_id, summary.stream_id, summary.status, (summary.finished_at or datetime.now(timezone.utc)).isoformat(), payload),
+                (
+                    summary.attempt_id,
+                    summary.stream_id,
+                    summary.status,
+                    (summary.finished_at or datetime.now(timezone.utc)).isoformat(),
+                    payload,
+                ),
             )
 
     def attempts(self, stream_id: str | None = None) -> list[IngestionAttemptSummary]:
         if stream_id is None:
-            rows = self.connection.execute("SELECT payload_json FROM ingestion_attempts ORDER BY finished_at, attempt_id").fetchall()
+            rows = self.connection.execute(
+                "SELECT payload_json FROM ingestion_attempts ORDER BY finished_at, attempt_id"
+            ).fetchall()
         else:
-            rows = self.connection.execute("SELECT payload_json FROM ingestion_attempts WHERE stream_id=? ORDER BY finished_at, attempt_id", (stream_id,)).fetchall()
+            rows = self.connection.execute(
+                "SELECT payload_json FROM ingestion_attempts WHERE stream_id=? ORDER BY finished_at, attempt_id", (stream_id,)
+            ).fetchall()
         return [IngestionAttemptSummary.model_validate_json(row[0]) for row in rows]
 
     def verify(self, entry: SnapshotCatalogEntry) -> None:
@@ -371,10 +410,14 @@ class SnapshotCatalog:
             raise ValueError(f"Snapshot manifest checksum mismatch: {entry.snapshot_id}")
         if hashlib.sha256(bars_path.read_bytes()).hexdigest() != manifest.get("bars_sha256"):
             raise ValueError(f"Snapshot bars checksum mismatch: {entry.snapshot_id}")
-        snapshot_hash = hashlib.sha256(canonical_json_bytes({
-            "bars": pl.read_parquet(bars_path).to_dicts(),
-            "provenance": manifest.get("snapshot_provenance", {}),
-        })).hexdigest()
+        snapshot_hash = hashlib.sha256(
+            canonical_json_bytes(
+                {
+                    "bars": pl.read_parquet(bars_path).to_dicts(),
+                    "provenance": manifest.get("snapshot_provenance", {}),
+                }
+            )
+        ).hexdigest()
         if snapshot_hash != entry.snapshot_hash:
             raise ValueError(f"Snapshot content identity mismatch: {entry.snapshot_id}")
 

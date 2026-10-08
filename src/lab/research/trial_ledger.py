@@ -119,22 +119,28 @@ class TrialLedger:
     def comparable_evidence(
         self,
         *,
+        campaign: str | None = None,
         snapshot_hash: str,
         evaluation_hash: str,
         frequency: str,
         cost_treatment: str | None = None,
+        task: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Return every attempted comparable trial, including failed attempts."""
-        rows = self.connection.execute(
-            "SELECT logical_trial_id, campaign, config_hash, snapshot_hash, evaluation_hash, settings_json, created_at FROM trials WHERE snapshot_hash=? AND evaluation_hash=? ORDER BY created_at",
-            (snapshot_hash, evaluation_hash),
-        ).fetchall()
+        """Return comparable logical trials and retain attempts for exclusion reporting."""
+        query = "SELECT logical_trial_id, campaign, config_hash, snapshot_hash, evaluation_hash, settings_json, created_at FROM trials WHERE snapshot_hash=? AND evaluation_hash=?"
+        params: list[Any] = [snapshot_hash, evaluation_hash]
+        if campaign is not None:
+            query += " AND campaign=?"
+            params.append(campaign)
+        rows = self.connection.execute(query + " ORDER BY created_at", tuple(params)).fetchall()
         evidence = []
         for row in rows:
             settings = json.loads(row[5])
             if settings.get("frequency", frequency) != frequency:
                 continue
             if cost_treatment is not None and settings.get("cost_treatment") != cost_treatment:
+                continue
+            if task is not None and settings.get("task") != task:
                 continue
             attempts = self.attempts(row[0])
             evidence.append({
@@ -152,27 +158,41 @@ class TrialLedger:
     def comparable_return_series(
         self,
         *,
+        campaign: str | None = None,
         snapshot_hash: str,
         evaluation_hash: str,
         frequency: str,
         cost_treatment: str | None = None,
+        task: str | None = None,
     ) -> dict[str, Any]:
-        """Separate complete return series from excluded comparable attempts."""
+        """Select one verified successful attempt per logical trial."""
         evidence = self.comparable_evidence(
+            campaign=campaign,
             snapshot_hash=snapshot_hash,
             evaluation_hash=evaluation_hash,
             frequency=frequency,
             cost_treatment=cost_treatment,
+            task=task,
         )
         complete: list[dict[str, Any]] = []
         exclusions: list[dict[str, Any]] = []
         for trial in evidence:
+            successful = [
+                attempt for attempt in trial["attempts"]
+                if attempt["status"] == "completed" and (attempt.get("result") or {}).get("development_net_returns")
+            ]
+            selected = successful[-1] if successful else None
+            if selected is not None:
+                complete.append({"logical_trial_id": trial["logical_trial_id"], "attempt_id": selected["attempt_id"], "returns": selected["result"]["development_net_returns"]})
             for attempt in trial["attempts"]:
-                returns = (attempt.get("result") or {}).get("development_net_returns")
-                if attempt["status"] != "completed" or not returns:
-                    exclusions.append({"logical_trial_id": trial["logical_trial_id"], "attempt_id": attempt["attempt_id"], "status": attempt["status"], "reason": attempt.get("error") or "missing returns"})
+                if selected is not None and attempt["attempt_id"] == selected["attempt_id"]:
                     continue
-                complete.append({"logical_trial_id": trial["logical_trial_id"], "attempt_id": attempt["attempt_id"], "returns": returns})
+                exclusions.append({
+                    "logical_trial_id": trial["logical_trial_id"],
+                    "attempt_id": attempt["attempt_id"],
+                    "status": attempt["status"],
+                    "reason": "duplicate successful attempt" if attempt["status"] == "completed" else attempt.get("error") or "missing returns",
+                })
         return {"complete": complete, "exclusions": exclusions, "population": len(evidence)}
 
     def close(self) -> None:

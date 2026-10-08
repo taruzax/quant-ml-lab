@@ -141,35 +141,132 @@ class PreprocessingState(ContractModel):
     diagnostics: dict[str, Any] = Field(default_factory=dict)
 
 
+class WindowSet:
+    """Read-only indexed views over per-ticker feature blocks."""
+
+    __slots__ = ("feature_blocks", "block_ids", "starts", "seq_len", "y", "_feature_count")
+
+    def __init__(
+        self,
+        feature_blocks: tuple[np.ndarray, ...] | list[np.ndarray],
+        block_ids: np.ndarray,
+        starts: np.ndarray,
+        seq_len: int,
+        *,
+        feature_count: int | None = None,
+        y: np.ndarray | None = None,
+    ) -> None:
+        if seq_len <= 0:
+            raise ValueError("WindowSet seq_len must be positive")
+        blocks = tuple(np.asarray(block, dtype=np.float32) for block in feature_blocks)
+        if blocks and blocks[0].ndim != 2:
+            raise ValueError("WindowSet feature blocks must have [rows, features] shape")
+        inferred_features = blocks[0].shape[1] if blocks else feature_count
+        if inferred_features is None or inferred_features < 0:
+            raise ValueError("WindowSet requires a feature_count when it has no blocks")
+        for block in blocks:
+            if block.ndim != 2 or block.shape[1] != inferred_features:
+                raise ValueError("WindowSet feature blocks must have consistent [rows, features] shape")
+            block.setflags(write=False)
+        raw_ids = np.asarray(block_ids)
+        raw_offsets = np.asarray(starts)
+        if (raw_ids.size and not np.issubdtype(raw_ids.dtype, np.integer)) or (
+            raw_offsets.size and not np.issubdtype(raw_offsets.dtype, np.integer)
+        ):
+            raise ValueError("WindowSet descriptors must use integer block_ids and starts")
+        ids = raw_ids.astype(np.int64, copy=False)
+        offsets = raw_offsets.astype(np.int64, copy=False)
+        if ids.ndim != 1 or offsets.ndim != 1 or len(ids) != len(offsets):
+            raise ValueError("WindowSet descriptors must be aligned one-dimensional arrays")
+        if np.any(ids < 0) or np.any(ids >= len(blocks)):
+            raise ValueError("WindowSet block_ids contain an invalid feature block")
+        if np.any(offsets < 0):
+            raise ValueError("WindowSet starts must be non-negative")
+        block_lengths = np.asarray([len(block) for block in blocks], dtype=np.int64)
+        if len(ids) and np.any(offsets + seq_len > block_lengths[ids]):
+            raise ValueError("WindowSet descriptor exceeds its feature block bounds")
+        targets = None if y is None else np.asarray(y, dtype=np.float32)
+        if targets is not None and (targets.ndim == 0 or targets.shape[0] != len(ids)):
+            raise ValueError("WindowSet targets must align with window descriptors")
+        ids.setflags(write=False)
+        offsets.setflags(write=False)
+        if targets is not None:
+            targets.setflags(write=False)
+        self.feature_blocks = blocks
+        self.block_ids = ids
+        self.starts = offsets
+        self.seq_len = int(seq_len)
+        self.y = targets
+        self._feature_count = int(inferred_features)
+
+    def __len__(self) -> int:
+        return len(self.starts)
+
+    @property
+    def shape(self) -> tuple[int, int, int]:
+        return (len(self), self.seq_len, self._feature_count)
+
+    def __getitem__(self, index: int) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+        """Return an independent window copy bounded by one T×F sample."""
+        if not isinstance(index, (int, np.integer)):
+            raise TypeError("WindowSet indices must be integers")
+        if index < 0:
+            index += len(self)
+        if index < 0 or index >= len(self):
+            raise IndexError("WindowSet index out of range")
+        block = self.feature_blocks[int(self.block_ids[index])]
+        start = int(self.starts[index])
+        window = block[start : start + self.seq_len].copy()
+        return window if self.y is None else (window, self.y[index].copy())
+
+    def to_numpy(self) -> np.ndarray:
+        """Explicitly materialize all indexed windows into one contiguous array."""
+        result = np.empty(self.shape, dtype=np.float32)
+        for index, (block_id, start) in enumerate(zip(self.block_ids, self.starts)):
+            offset = int(start)
+            result[index] = self.feature_blocks[int(block_id)][offset : offset + self.seq_len]
+        return result
+
+
 class SampleSet(ContractModel):
     schema_version: str = "sample-set.v1"
-    X: np.ndarray
+    X: WindowSet
     keys: tuple[SampleKey, ...]
     window_start: tuple[datetime, ...]
     window_end: tuple[datetime, ...]
-    raw_row_indices: tuple[tuple[int, ...], ...]
     feature_order: tuple[str, ...]
     y: np.ndarray | None = None
     label_metadata: tuple[dict[str, Any], ...] | None = None
 
     @model_validator(mode="after")
     def validate_sample_shape(self) -> "SampleSet":
-        if self.X.ndim != 3:
+        if len(self.X.shape) != 3:
             raise ValueError("SampleSet.X must have shape [N, T, F]")
-        if not np.isfinite(self.X).all():
-            raise ValueError("SampleSet.X must contain only finite values")
-        count = self.X.shape[0]
+        count = len(self.X)
         if len(self.keys) != count or len(self.window_start) != count or len(self.window_end) != count:
             raise ValueError("SampleSet metadata must have one row per sample")
-        if len(self.raw_row_indices) != count:
-            raise ValueError("SampleSet.raw_row_indices must have one row per sample")
         if self.y is not None and self.y.shape[0] != count:
             raise ValueError("SampleSet.y must align with SampleSet.keys")
+        if self.X.y is not None and self.y is not None:
+            if self.X.y.shape != self.y.shape or not np.array_equal(self.X.y, self.y, equal_nan=True):
+                raise ValueError("WindowSet targets must align with SampleSet.y")
         if len(self.feature_order) != self.X.shape[2]:
             raise ValueError("feature_order length must match the final SampleSet dimension")
         validate_feature_names(self.feature_order)
         if len({(key.ticker, key.timestamp) for key in self.keys}) != len(self.keys):
             raise ValueError("SampleSet keys must be unique")
+        if any(start.tzinfo is None or start.utcoffset() is None for start in self.window_start):
+            raise ValueError("SampleSet window_start timestamps must be timezone-aware")
+        if any(end != key.timestamp for end, key in zip(self.window_end, self.keys)):
+            raise ValueError("SampleSet window_end values must align with sample keys")
+        if any(start > end for start, end in zip(self.window_start, self.window_end)):
+            raise ValueError("SampleSet window_start must not follow window_end")
+        if self.label_metadata is not None and len(self.label_metadata) != count:
+            raise ValueError("SampleSet label_metadata must have one row per sample")
+        if self.label_metadata is not None and any(
+            item.get("decision_time") != key.timestamp for item, key in zip(self.label_metadata, self.keys)
+        ):
+            raise ValueError("SampleSet label metadata decision times must align with sample keys")
         return self
 
 

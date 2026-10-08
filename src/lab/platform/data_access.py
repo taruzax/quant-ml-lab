@@ -239,9 +239,7 @@ def canonicalize_bars(
         records.append(normalized)
 
     result = pl.DataFrame(records).sort(["ticker", "bar_open_time"])
-    result = result.with_columns(
-        pl.int_range(0, pl.len()).over("ticker").cast(pl.Int64).alias("raw_bar_index")
-    )
+    result = result.with_columns(pl.int_range(0, pl.len()).over("ticker").cast(pl.Int64).alias("raw_bar_index"))
     result = result.select(
         [
             "ticker",
@@ -256,19 +254,24 @@ def canonicalize_bars(
             "volume",
             "session_id",
         ]
-        + [column for column in result.columns if column not in {
-            "ticker",
-            "raw_bar_index",
-            "bar_open_time",
-            "bar_close_time",
-            "timestamp",
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume",
-            "session_id",
-        }]
+        + [
+            column
+            for column in result.columns
+            if column
+            not in {
+                "ticker",
+                "raw_bar_index",
+                "bar_open_time",
+                "bar_close_time",
+                "timestamp",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "session_id",
+            }
+        ]
     )
     validate_canonical_bars(result, calendar=calendar, timeframe=timeframe)
     return result
@@ -285,7 +288,11 @@ def consolidate_partitions(
     frames: list[pl.DataFrame] = []
     for partition in partitions:
         if isinstance(partition, (str, pathlib.Path)):
-            frames.append(canonicalize_bars(_read_input_frame(pathlib.Path(partition)), calendar=calendar, timeframe=timeframe, metadata=metadata))
+            frames.append(
+                canonicalize_bars(
+                    _read_input_frame(pathlib.Path(partition)), calendar=calendar, timeframe=timeframe, metadata=metadata
+                )
+            )
         else:
             frames.append(canonicalize_bars(partition, calendar=calendar, timeframe=timeframe, metadata=metadata))
     if not frames:
@@ -305,9 +312,7 @@ def consolidate_partitions(
         else:
             unique[key] = comparable
     result = pl.DataFrame(list(unique.values())).sort(["ticker", "bar_open_time"])
-    result = result.with_columns(
-        pl.int_range(0, pl.len()).over("ticker").cast(pl.Int64).alias("raw_bar_index")
-    ).select(
+    result = result.with_columns(pl.int_range(0, pl.len()).over("ticker").cast(pl.Int64).alias("raw_bar_index")).select(
         [
             "ticker",
             "raw_bar_index",
@@ -321,19 +326,24 @@ def consolidate_partitions(
             "volume",
             "session_id",
         ]
-        + [column for column in combined.columns if column not in {
-            "ticker",
-            "raw_bar_index",
-            "bar_open_time",
-            "bar_close_time",
-            "timestamp",
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume",
-            "session_id",
-        }]
+        + [
+            column
+            for column in combined.columns
+            if column
+            not in {
+                "ticker",
+                "raw_bar_index",
+                "bar_open_time",
+                "bar_close_time",
+                "timestamp",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "session_id",
+            }
+        ]
     )
     validate_canonical_bars(result, calendar=calendar, timeframe=timeframe)
     return result, {"input_rows": combined.height, "duplicate_rows_collapsed": duplicate_count, "output_rows": result.height}
@@ -362,9 +372,7 @@ def build_market_snapshot(
     source_manifest: list[dict[str, Any]] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> MarketSnapshot:
-    bars, diagnostics = consolidate_partitions(
-        partitions, calendar=calendar, timeframe=timeframe, metadata=metadata
-    )
+    bars, diagnostics = consolidate_partitions(partitions, calendar=calendar, timeframe=timeframe, metadata=metadata)
     snapshot_hash = _snapshot_hash(bars, provenance)
     return MarketSnapshot(
         snapshot_id=f"snapshot-{snapshot_hash[:16]}",

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+import platform
+from importlib.metadata import PackageNotFoundError, version
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,6 +11,7 @@ import polars as pl
 from lab.core.config import PipelineConfig
 from lab.core.contracts import FoldBundle, FoldSpec, PreparedDataset, SampleSet
 from lab.models.base import BaseModel
+from lab.models.devices import resolve_device
 from lab.models.registry import create_model
 from lab.quant.cv import purge_training_labels, scoreable_labels
 from lab.research.dataset import build_sample_set
@@ -75,7 +78,7 @@ def build_inner_stopping_data(
         allowed_decisions=stopping_allowed,
         target_name=_target_name(dataset),
     )
-    if train_samples.X.shape[0] == 0 or stopping_samples.X.shape[0] == 0:
+    if len(train_samples.X) == 0 or len(stopping_samples.X) == 0:
         raise ValueError("C15 early stopping produced an empty supervised inner split")
     purged_count = int(inner_candidates.height - inner_train.height)
     diagnostics = {
@@ -83,8 +86,8 @@ def build_inner_stopping_data(
         "stopping_start": stopping_start,
         "stopping_end": fold.train_end,
         "purged_inner_rows": purged_count,
-        "train_rows": int(train_samples.X.shape[0]),
-        "stopping_rows": int(stopping_samples.X.shape[0]),
+        "train_rows": len(train_samples.X),
+        "stopping_rows": len(stopping_samples.X),
         "metric": "mse" if config.task.kind == "regression" else "cross_entropy",
         "stopping_score_diagnostics": stopping_diagnostics,
     }
@@ -96,11 +99,35 @@ def _model_params(config: PipelineConfig, model_name: str) -> dict[str, Any]:
     if model_name != "baseline":
         params["seed"] = config.models.seed
         params["device"] = config.models.device
+        if model_name in {"gru", "lstm"}:
+            params["deterministic_policy"] = config.models.deterministic_policy
     return params
 
 
+def _runtime_versions() -> dict[str, str | None]:
+    versions: dict[str, str | None] = {"python": platform.python_version()}
+    for package in ("numpy", "torch", "xgboost", "scikit-learn"):
+        try:
+            versions[package] = version(package)
+        except PackageNotFoundError:
+            versions[package] = None
+    return versions
+
+
 def _new_model(config: PipelineConfig, model_name: str) -> BaseModel:
-    return create_model(model_name, task=config.task.kind, params=_model_params(config, model_name))
+    model = create_model(model_name, task=config.task.kind, params=_model_params(config, model_name))
+    requested_device = "cpu" if model_name == "baseline" and config.models.device in {"mps", "cuda"} else config.models.device
+    resolution = resolve_device(model_name, requested_device)
+    model.device_resolution = resolution.model_dump(mode="json")
+    model.runtime_metadata = {
+        "requested_device": config.models.device,
+        "resolved_device": resolution.resolved_device,
+        "device_reason": resolution.reason,
+        "seed": config.models.seed,
+        "deterministic_policy": config.models.deterministic_policy,
+        "package_versions": _runtime_versions(),
+    }
+    return model
 
 
 def train_candidate(

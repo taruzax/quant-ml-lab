@@ -130,7 +130,7 @@ def build_allocations(
         else:
             signals = np.asarray([], dtype=np.int8)
         if decision_index % allocation_config.rebalance_every_bars == 0:
-            history_bars = max(252, allocation_config.lookback_bars) if allocation_config.method == "hrp" else allocation_config.lookback_bars
+            history_bars = allocation_config.lookback_bars
             eligible, eligibility = _eligible_tickers(snapshot.bars, ordered_tickers, decision_time, history_bars)
             selected = tuple(sorted(eligible))
             covariance_snapshot = None

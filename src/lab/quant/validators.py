@@ -1,12 +1,13 @@
-import polars as pl
 from typing import Any
+
+import polars as pl
 
 # pyrefly: ignore [missing-import]
 from lab.core.config import PipelineConfig
 
 # pyrefly: ignore [missing-import]
 from lab.core.schemas import CANONICAL_BAR_COLUMNS, PRICE_COLUMNS, REQUIRED_DTYPES, REQUIRED_OHLCV_COLUMNS
-from lab.quant.timing import as_utc, normalize_explicit_bar_times
+from lab.quant.timing import normalize_explicit_bar_times
 
 
 class DataValidationError(Exception):
@@ -176,10 +177,14 @@ def compare_bar_coverage(
         raise DataValidationError(f"Observed coverage keys are missing: {sorted(observed_columns - set(observed.columns))}")
     selected_tickers = tuple(tickers or sorted(observed["ticker"].unique().to_list()))
     expected_keys = expected.select(sorted(expected_columns))
-    expected_with_ticker = pl.concat(
-        [expected_keys.with_columns(pl.lit(ticker).alias("ticker")) for ticker in selected_tickers],
-        how="vertical",
-    ) if selected_tickers else expected_keys.with_columns(pl.lit(None, dtype=pl.Utf8).alias("ticker"))
+    expected_with_ticker = (
+        pl.concat(
+            [expected_keys.with_columns(pl.lit(ticker).alias("ticker")) for ticker in selected_tickers],
+            how="vertical",
+        )
+        if selected_tickers
+        else expected_keys.with_columns(pl.lit(None, dtype=pl.Utf8).alias("ticker"))
+    )
     observed_keys = observed.select(sorted(observed_columns))
     duplicates = observed_keys.group_by(sorted(observed_columns)).len().filter(pl.col("len") > 1)
     distinct_observed = observed_keys.unique(subset=sorted(observed_columns))

@@ -23,6 +23,12 @@ class PipelineConfigResource(ConfigurableResource):
     def to_pipeline_config(self) -> PipelineConfig:
         overrides = dict(self.overrides)
         if self.timeframe is not None or self.sequence_len is not None:
-            overrides["data"] = {**overrides.get("data", {}), **({"timeframe": self.timeframe} if self.timeframe is not None else {})}
-            overrides["tensor"] = {**overrides.get("tensor", {}), **({"sequence_len": self.sequence_len} if self.sequence_len is not None else {})}
+            overrides["data"] = {
+                **overrides.get("data", {}),
+                **({"timeframe": self.timeframe} if self.timeframe is not None else {}),
+            }
+            overrides["tensor"] = {
+                **overrides.get("tensor", {}),
+                **({"sequence_len": self.sequence_len} if self.sequence_len is not None else {}),
+            }
         return PipelineConfig.from_yaml(Path(self.config_path), overrides=overrides)

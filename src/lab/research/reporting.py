@@ -155,7 +155,7 @@ def _metric_rows(metrics: Any) -> str:
     return "".join(rows) or "<tr><td colspan='2'>No predictive metrics were saved.</td></tr>"
 
 
-def _period_summary(label: str, result: RunResult, *, frequency: str, min_observations: int) -> dict[str, Any]:
+def _period_summary(label: str, result: RunResult, *, frequency: str, min_observations: int, fees_bps: float, slippage_bps: float) -> dict[str, Any]:
     backtest = result.backtest
     prediction_count = sum(len(frame.keys) for frame in result.predictions)
     if backtest is None or backtest.net_returns is None:
@@ -173,6 +173,9 @@ def _period_summary(label: str, result: RunResult, *, frequency: str, min_observ
     gross = backtest.gross_returns.to_numpy() if backtest.gross_returns is not None else None
     orders = backtest.orders
     costs = float(orders.get_column("fees").sum()) if "fees" in orders.columns and orders.height else 0.0
+    total_cost_bps = fees_bps + slippage_bps
+    fee_cost = costs * fees_bps / total_cost_bps if total_cost_bps else 0.0
+    slippage_cost = costs * slippage_bps / total_cost_bps if total_cost_bps else 0.0
     native_net = equity_statistics(net, frequency="native")
     session_net = compound_session_returns(timestamps, net)
     session_summary = equity_statistics(session_net.to_numpy(), frequency=frequency)
@@ -195,6 +198,9 @@ def _period_summary(label: str, result: RunResult, *, frequency: str, min_observ
         "prediction_count": prediction_count,
         "filled_trades": orders.height,
         "costs": costs,
+        "fee_cost": fee_cost,
+        "slippage_cost": slippage_cost,
+        "turnover": float(backtest.turnover.sum()) if getattr(backtest, "turnover", None) is not None else "unavailable",
         "native_net": native_net,
         "session_net": session_summary,
         "native_gross": gross_summary,
@@ -212,8 +218,11 @@ def _period_summary(label: str, result: RunResult, *, frequency: str, min_observ
     }
 
 
-def _run_metadata(label: str, result: RunResult, *, frequency: str, min_observations: int) -> str:
-    summary = _period_summary(label, result, frequency=frequency, min_observations=min_observations)
+def _run_metadata(label: str, result: RunResult, *, frequency: str, min_observations: int, fees_bps: float, slippage_bps: float) -> str:
+    summary = _period_summary(
+        label, result, frequency=frequency, min_observations=min_observations,
+        fees_bps=fees_bps, slippage_bps=slippage_bps,
+    )
     rows = [
         ("Run ID", summary["run_id"]),
         ("Predictions", summary["prediction_count"]),
@@ -221,6 +230,11 @@ def _run_metadata(label: str, result: RunResult, *, frequency: str, min_observat
         ("First saved timestamp", summary.get("first_timestamp", "unavailable")),
         ("Last saved timestamp", summary.get("last_timestamp", "unavailable")),
         ("Costs paid", summary.get("costs", "unavailable")),
+        ("Fees paid (allocated from combined transaction costs)", summary.get("fee_cost", "unavailable")),
+        ("Slippage paid (allocated from combined transaction costs)", summary.get("slippage_cost", "unavailable")),
+        ("Configured fees (bps)", fees_bps),
+        ("Configured slippage (bps)", slippage_bps),
+        ("Absolute quantity turnover", summary.get("turnover", "unavailable")),
         ("Native net return", summary.get("native_net", {}).get("total_return", "unavailable")),
         ("Session-daily net return", summary.get("session_net", {}).get("total_return", "unavailable")),
         ("Native gross return", (summary.get("native_gross") or {}).get("total_return", "unavailable")),
@@ -291,8 +305,8 @@ def generate_demo_report(
             if development.snapshot is not None and development.snapshot.timeframe.value == "1h"
             else ""
         )
-        + _run_metadata("Development", development, frequency=config.statistics.frequency, min_observations=config.statistics.min_observations)
-        + _run_metadata("Synthetic holdout", holdout, frequency=config.statistics.frequency, min_observations=config.statistics.min_observations)
+        + _run_metadata("Development", development, frequency=config.statistics.frequency, min_observations=config.statistics.min_observations, fees_bps=config.backtest.fees_bps, slippage_bps=config.backtest.slippage_bps)
+        + _run_metadata("Synthetic holdout", holdout, frequency=config.statistics.frequency, min_observations=config.statistics.min_observations, fees_bps=config.backtest.fees_bps, slippage_bps=config.backtest.slippage_bps)
     )
     timestamps = development.backtest.equity.get_column("timestamp").to_list()
     return generate_local_report(
@@ -301,6 +315,46 @@ def generate_demo_report(
         gross_returns=development.backtest.gross_returns.to_numpy() if development.backtest.gross_returns is not None else None,
         timestamps=timestamps,
         title="Quant ML Lab offline demo",
+        frequency=config.statistics.frequency,
+        summary_html=summary_html,
+    )
+
+
+def generate_run_report(
+    path: str | Path,
+    *,
+    result: RunResult,
+    config: PipelineConfig,
+    evidence: dict[str, Any] | None = None,
+    report_type: str = "development",
+) -> Path:
+    """Generate a standalone report for any verified saved run."""
+    if report_type not in {"development", "holdout", "saved-prediction"}:
+        raise ValueError(f"Unsupported report type: {report_type}")
+    summary_html = (
+        "<style>body{font-family:system-ui,sans-serif;line-height:1.4;margin:2rem;max-width:1100px}"
+        "table{border-collapse:collapse;margin:0 0 1.5rem;min-width:28rem}th,td{border:1px solid #ccc;padding:.35rem .6rem;text-align:left;vertical-align:top}"
+        "th{background:#f3f3f3}section{border-top:3px solid #555;margin-top:2rem;padding-top:1rem}code{word-break:break-all}</style>"
+        f"<h1>Quant ML Lab {html.escape(report_type)} report</h1>"
+        f"<p>Run ID: <code>{html.escape(result.ref.run_id)}</code>. This report is derived from verified saved artifacts.</p>"
+        f"<h2>Source identity</h2><p>Snapshot hash: <code>{html.escape(result.ref.snapshot_hash)}</code><br>Configuration hash: <code>{html.escape(result.ref.config_hash)}</code><br>Split hash: <code>{html.escape(result.ref.split_hash)}</code></p>"
+        f"<h2>Dataset provenance</h2>{_provenance_html(result)}"
+        f"<h2>Candidate comparison</h2><pre>{html.escape(_format_value(result.artifact_manifest.get('candidates', [])))}</pre>"
+        f"<h2>Campaign evidence</h2><pre>{html.escape(_format_value(evidence or {'status': 'unavailable', 'reason': 'not requested'}))}</pre>"
+        + _run_metadata(report_type.title(), result, frequency=config.statistics.frequency, min_observations=config.statistics.min_observations, fees_bps=config.backtest.fees_bps, slippage_bps=config.backtest.slippage_bps)
+    )
+    if result.backtest is None or result.backtest.net_returns is None:
+        output = Path(path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(f"<html><body>{summary_html}<p>Backtest metrics unavailable: no saved net returns.</p></body></html>")
+        return output
+    timestamps = result.backtest.equity.get_column("timestamp").to_list()
+    return generate_local_report(
+        path,
+        net_returns=result.backtest.net_returns.to_numpy(),
+        gross_returns=result.backtest.gross_returns.to_numpy() if result.backtest.gross_returns is not None else None,
+        timestamps=timestamps,
+        title=f"Quant ML Lab {report_type} report",
         frequency=config.statistics.frequency,
         summary_html=summary_html,
     )

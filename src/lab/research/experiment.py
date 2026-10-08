@@ -6,6 +6,7 @@ import hashlib
 import json
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,8 +14,10 @@ import numpy as np
 import polars as pl
 
 from lab.core.config import PipelineConfig, get_platform_config
-from lab.core.contracts import AllocationFrame, BacktestResult, FoldBundle, FoldSpec, MarketSnapshot, MetricResult, PredictionFrame, PreparedDataset, RunRef, RunResult, SampleKey
+from lab.core.contracts import AllocationFrame, BacktestResult, CampaignEvidenceReport, FoldBundle, FoldSpec, MarketSnapshot, MetricResult, PredictionFrame, PreparedDataset, PreparedDatasetRef, RunRef, RunResult, SampleKey
+from lab.models.registry import create_model
 from lab.platform.artifacts import ArtifactStore, sha256_file
+from lab.platform.evidence_store import EvidenceStore
 from lab.platform.mlflow_adapter import log_local_model
 from lab.quant.backtest import simulate_strategy
 from lab.quant.metrics import classification_metrics, regression_metrics, sharpe_evidence_metrics, sharpe_statistics
@@ -229,9 +232,19 @@ def persist_run(
     return RunResult(ref=ref, predictions=predictions, allocations=allocations, metrics=metrics, backtest=backtest, snapshot=dataset.snapshot, artifact_manifest=manifest)
 
 
-def run_experiment(config: PipelineConfig, dataset: PreparedDataset | None = None) -> RunResult:
+def run_experiment(
+    config: PipelineConfig,
+    dataset: PreparedDataset | None = None,
+    *,
+    tracking_mode: str = "immediate",
+    dataset_ref: PreparedDatasetRef | None = None,
+) -> RunResult:
     """Evaluate every enabled candidate, persist failures, and select one result."""
-    prepared = dataset or prepare_dataset(config)
+    if tracking_mode not in {"immediate", "deferred", "disabled"}:
+        raise ValueError("tracking_mode must be immediate, deferred, or disabled")
+    if dataset is not None and dataset_ref is not None:
+        raise ValueError("Pass either dataset or dataset_ref, not both")
+    prepared = dataset or prepare_dataset(config, dataset_ref=dataset_ref)
     store = ArtifactStore(get_platform_config().paths.artifacts_dir)
     run_id = store.create_run()
     ledger = TrialLedger(get_platform_config().paths.artifacts_dir / "trials.sqlite")
@@ -285,7 +298,7 @@ def run_experiment(config: PipelineConfig, dataset: PreparedDataset | None = Non
                     prediction = predict_fold(model, bundle, model_ref=model_ref, fold_ref=str(len(candidate_dirs) - 1), task=config.task.kind)
                     candidate_predictions.append(prediction)
                     platform = get_platform_config()
-                    if platform.mlflow.enabled:
+                    if platform.mlflow.enabled and tracking_mode == "immediate":
                         fold_metrics = evaluate_predictions((prediction,), (bundle,), task=config.task.kind)
                         tracking_refs.append(
                             log_local_model(
@@ -325,6 +338,8 @@ def run_experiment(config: PipelineConfig, dataset: PreparedDataset | None = Non
                             "fraction": config.models.early_stopping_fraction,
                             "patience": config.models.early_stopping_patience,
                         },
+                        "model_bundles": candidate_dirs,
+                        "tracking_mode": tracking_mode if get_platform_config().mlflow.enabled else "disabled",
                         "tracking_refs": tracking_refs,
                     }
                 )
@@ -472,10 +487,12 @@ def campaign_evidence(run_id: str, *, artifacts_dir: str | Path | None = None) -
     ledger = TrialLedger(Path(artifacts_dir or get_platform_config().paths.artifacts_dir) / "trials.sqlite")
     try:
         series = ledger.comparable_return_series(
+            campaign=result.artifact_manifest["config"]["campaign"]["name"],
             snapshot_hash=result.ref.snapshot_hash,
             evaluation_hash=result.ref.split_hash,
             frequency=result.artifact_manifest["config"]["statistics"]["frequency"],
             cost_treatment="fees+slippage",
+            task=result.artifact_manifest.get("task"),
         )
         trial_sharpes = []
         for item in series["complete"]:
@@ -489,10 +506,99 @@ def campaign_evidence(run_id: str, *, artifacts_dir: str | Path | None = None) -
             trial_sharpes=trial_sharpes,
             frequency=result.artifact_manifest["config"]["statistics"]["frequency"],
             min_observations=result.artifact_manifest["config"]["statistics"]["min_observations"],
-        ) if len(current_returns) else {}
-        return {"metrics": metrics, "trial_count": len(trial_sharpes), "population": series["population"], "exclusions": series["exclusions"]}
+        )
+        report = CampaignEvidenceReport(
+            source_run_id=run_id,
+            campaign=result.artifact_manifest["config"]["campaign"]["name"],
+            comparison_dimensions={
+                "snapshot_hash": result.ref.snapshot_hash,
+                "evaluation_hash": result.ref.split_hash,
+                "task": result.artifact_manifest.get("task"),
+                "frequency": result.artifact_manifest["config"]["statistics"]["frequency"],
+                "cost_treatment": "fees+slippage",
+            },
+            included_logical_trial_ids=tuple(item["logical_trial_id"] for item in series["complete"]),
+            selected_attempt_ids=tuple(item["attempt_id"] for item in series["complete"]),
+            exclusions=tuple(series["exclusions"]),
+            population_counts={
+                "logical_trials": series["population"],
+                "selected_attempts": len(series["complete"]),
+                "excluded_attempts": len(series["exclusions"]),
+            },
+            metric_values={name: metric.value for name, metric in metrics.items()},
+            metric_details={
+                name: {"status": metric.status, "reason": metric.reason, "conventions": metric.conventions}
+                for name, metric in metrics.items()
+            },
+            calculated_at=datetime.now(timezone.utc),
+        )
+        sidecar = EvidenceStore(artifacts_dir or get_platform_config().paths.artifacts_dir).write(report.model_dump(mode="json"))
+        return {**report.model_dump(mode="json"), "evidence_sidecar": sidecar, "metrics": metrics}
     finally:
         ledger.close()
+
+
+def index_deferred_run(run_id: str, *, artifacts_dir: str | Path | None = None) -> dict[str, Any]:
+    """Index deferred campaign fold bundles serially without changing the run manifest."""
+    store = ArtifactStore(artifacts_dir or get_platform_config().paths.artifacts_dir)
+    run_dir = store.run_dir(run_id)
+    sidecar_path = run_dir / "tracking" / "index.json"
+    if sidecar_path.exists():
+        return json.loads(sidecar_path.read_text())
+    result = load_run(run_id, artifacts_dir=artifacts_dir)
+    platform = get_platform_config()
+    if not platform.mlflow.enabled:
+        return {"status": "disabled", "run_id": run_id, "references": []}
+    references: list[dict[str, str]] = []
+    errors: list[str] = []
+    config = PipelineConfig.model_validate(result.artifact_manifest["config"])
+    for candidate in result.artifact_manifest.get("candidates", []):
+        model_name = candidate.get("model")
+        if candidate.get("status") != "completed" or model_name not in {"baseline", "xgboost", "gru", "lstm"}:
+            continue
+        model_bundles = candidate.get("model_bundles", [])
+        metrics = {
+            metric["name"]: float(metric["value"])
+            for metric in candidate.get("metrics", [])
+            if metric.get("status") == "available" and metric.get("value") is not None
+        }
+        for fold_index, model_ref in enumerate(model_bundles):
+            model_dir = run_dir / model_ref
+            try:
+                model = create_model(model_name, task=config.task.kind)
+                model = type(model).load(model_dir)
+                references.append(log_local_model(
+                    model,
+                    artifact_path=f"{run_id}-{model_name}-fold-{fold_index}",
+                    model_dir=model_dir,
+                    tracking_uri=platform.paths.mlflow_tracking_uri,
+                    experiment_name=platform.mlflow.experiment_name,
+                    params={
+                        "run_id": run_id,
+                        "config_hash": result.ref.config_hash,
+                        "snapshot_hash": result.ref.snapshot_hash,
+                        "split_hash": result.ref.split_hash,
+                        "task": config.task.kind,
+                        "model": model_name,
+                        "seed": config.models.seed,
+                        "fold": fold_index,
+                        "model_bundle": model_ref,
+                    },
+                    metrics=metrics,
+                    idempotency_key=f"{run_id}:{model_name}:{fold_index}",
+                ))
+            except Exception as exc:
+                errors.append(f"{model_name} fold {fold_index}: {exc!r}")
+    sidecar = {
+        "schema_version": "tracking-index.v1",
+        "run_id": run_id,
+        "status": "indexed" if not errors else "partial_failure",
+        "references": references,
+        "errors": errors,
+    }
+    if not errors:
+        store.write_json(run_id, "tracking/index.json", sidecar)
+    return sidecar
 
 
 def evaluate_holdout(

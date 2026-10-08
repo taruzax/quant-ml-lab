@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from dagster import RunRequest, ScheduleDefinition, schedule
+from dagster import RunRequest, schedule
 
 from lab.core.config import IngestionConfig, IngestionStreamConfig, Timeframe
 from lab.quant.timing import expected_bar_keys
@@ -37,14 +37,22 @@ def _schedule_requests(context, timeframe: Timeframe) -> list[RunRequest]:
             now=now,
         )
         boundary = expected["bar_close_time"].max() if not expected.is_empty() else now
-        requests.append(RunRequest(
-            run_key=stable_run_key(stream, boundary),
-            run_config={"resources": {"config_py": {"config": {
-                "ingestion_config_path": config_path,
-                "ingestion_timeframe": timeframe.value,
-                "ingestion_stream_name": stream.name,
-            }}}},
-        ))
+        requests.append(
+            RunRequest(
+                run_key=stable_run_key(stream, boundary),
+                run_config={
+                    "resources": {
+                        "config_py": {
+                            "config": {
+                                "ingestion_config_path": config_path,
+                                "ingestion_timeframe": timeframe.value,
+                                "ingestion_stream_name": stream.name,
+                            }
+                        }
+                    }
+                },
+            )
+        )
     return requests
 
 

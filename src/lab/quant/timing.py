@@ -7,6 +7,7 @@ import polars as pl
 
 from lab.core.config import Timeframe
 
+
 def get_exchange_calendar(name: str):
     try:
         return xcals.get_calendar(name)
@@ -121,8 +122,11 @@ def expected_bar_keys(
             if opened < start_time or closed > end_time or closed > cutoff:
                 continue
             rows.append({"session_id": session_id, "bar_open_time": opened, "bar_close_time": closed})
-    return pl.DataFrame(rows, schema={
-        "session_id": pl.Utf8,
-        "bar_open_time": pl.Datetime("us", "UTC"),
-        "bar_close_time": pl.Datetime("us", "UTC"),
-    })
+    return pl.DataFrame(
+        rows,
+        schema={
+            "session_id": pl.Utf8,
+            "bar_open_time": pl.Datetime("us", "UTC"),
+            "bar_close_time": pl.Datetime("us", "UTC"),
+        },
+    )

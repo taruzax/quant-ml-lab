@@ -24,14 +24,14 @@ from dagster import (
 
 from lab.core.config import IngestionConfig, PipelineConfig, Timeframe, get_platform_config
 from lab.core.schemas import target_col
+from lab.platform.dagster.resources import PipelineConfigResource
 from lab.platform.data_access import load_market_data
 from lab.platform.ingestion import IngestionService
 from lab.platform.market_store import ProviderBatchStore, SnapshotCatalog
-from lab.platform.dagster.resources import PipelineConfigResource
 from lab.quant.features import apply_all_features
 from lab.quant.ffd import find_global_d, frac_diff_polars
 from lab.quant.validators import run_all_validations
-from lab.research.samples import TimeSeriesDataset
+from lab.research.dataset import build_sample_set
 
 DATA_PIPELINE_GROUP = "data_pipeline"
 
@@ -72,14 +72,23 @@ def ingestion_publication(context: AssetExecutionContext, config_py: PipelineCon
 def ingestion_calendar_coverage(ingestion_publication: dict[str, list[dict[str, Any]]]) -> AssetCheckResult:
     """Flag failed ingestion and incomplete recorded coverage without blocking snapshot history."""
     failures = [
-        {"stream_id": item["stream_id"], "status": item["status"], "missing_rows": item["missing_rows"], "error": item.get("error")}
+        {
+            "stream_id": item["stream_id"],
+            "status": item["status"],
+            "missing_rows": item["missing_rows"],
+            "error": item.get("error"),
+        }
         for item in ingestion_publication.get("attempts", [])
         if item["status"] == "failed" or (item["gap_policy"] == "record" and item["missing_rows"] > 0)
     ]
     return AssetCheckResult(
         passed=not failures,
-        metadata={"coverage_failures": MetadataValue.json(failures), "checked_stream_count": len(ingestion_publication.get("attempts", []))},
+        metadata={
+            "coverage_failures": MetadataValue.json(failures),
+            "checked_stream_count": len(ingestion_publication.get("attempts", [])),
+        },
     )
+
 
 ticker_partitions = DynamicPartitionsDefinition(name="tickers")
 time_window_partitions = DailyPartitionsDefinition(start_date="2020-01-01")
@@ -207,19 +216,18 @@ def tensors(
 ) -> MaterializeResult[pl.DataFrame]:
     pipeline_config = _pipeline_config(config_py)
     clean_df, feature_cols, target_cols = _clean_model_frame(ffd_features, pipeline_config)
+    timestamp_dtype = clean_df.schema["timestamp"]
+    if isinstance(timestamp_dtype, pl.Datetime) and timestamp_dtype.time_zone is None:
+        # Legacy loader emits naive datetimes; the zone does not affect window counts.
+        clean_df = clean_df.with_columns(pl.col("timestamp").dt.replace_time_zone("UTC"))
 
-    dataset = TimeSeriesDataset(
-        clean_df,
-        feature_cols=feature_cols,
-        target_cols=target_cols,
-        sequence_len=pipeline_config.sequence_len,
-    )
+    samples = build_sample_set(clean_df, feature_cols, pipeline_config.sequence_len)
 
     manifest = pl.DataFrame(
         {
             "timeframe": [pipeline_config.timeframe.value],
             "n_rows": [clean_df.height],
-            "n_windows": [len(dataset)],
+            "n_windows": [len(samples.X)],
             "n_features": [len(feature_cols)],
             "n_targets": [len(target_cols)],
             "sequence_len": [pipeline_config.sequence_len],
@@ -228,7 +236,7 @@ def tensors(
     return MaterializeResult(
         value=manifest,
         metadata={
-            "windows": MetadataValue.int(len(dataset)),
+            "windows": MetadataValue.int(len(samples.X)),
             "features": MetadataValue.int(len(feature_cols)),
             "targets": MetadataValue.int(len(target_cols)),
         },

@@ -43,13 +43,24 @@ def log_local_model(
     experiment_name: str,
     params: dict[str, Any],
     metrics: dict[str, float],
+    idempotency_key: str | None = None,
 ) -> dict[str, str]:
     """Record one exact local fold bundle and its metrics in local MLflow."""
     if tracking_uri.startswith("sqlite:///"):
         Path(tracking_uri.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     mlflow.set_tracking_uri(tracking_uri)
-    mlflow.set_experiment(experiment_name)
-    with mlflow.start_run(run_name=artifact_path) as run:
+    experiment = mlflow.set_experiment(experiment_name)
+    if idempotency_key is not None:
+        existing = mlflow.tracking.MlflowClient().search_runs(
+            [experiment.experiment_id],
+            filter_string=f"tags.quant_ml_tracking_key = '{idempotency_key}'",
+            max_results=1,
+        )
+        if existing:
+            run = existing[0]
+            return {"run_id": run.info.run_id, "model_uri": f"runs:/{run.info.run_id}/{artifact_path}"}
+    tags = {"quant_ml_tracking_key": idempotency_key} if idempotency_key is not None else None
+    with mlflow.start_run(run_name=artifact_path, tags=tags) as run:
         mlflow.log_params({key: str(value) for key, value in params.items()})
         mlflow.log_metrics(metrics)
         info = mlflow.pyfunc.log_model(

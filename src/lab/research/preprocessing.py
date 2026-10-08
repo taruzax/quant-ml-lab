@@ -1,13 +1,15 @@
 from dataclasses import dataclass
+import hashlib
 from typing import Any
 
 import numpy as np
 import polars as pl
 
 from lab.core.config import PipelineConfig
-from lab.core.contracts import FoldBundle, MarketSnapshot, PreparedDataset, PreprocessingState
+from lab.core.contracts import FoldBundle, MarketSnapshot, PreparedDataset, PreparedDatasetRef, PreprocessingState
 from lab.core.schemas import validate_feature_names
 from lab.platform.data_access import load_market_snapshot
+from lab.platform.dataset_store import DatasetStore
 from lab.quant.cv import fold_training_labels, scoreable_labels
 from lab.quant.features import apply_all_features, feature_specification
 from lab.quant.ffd import find_min_d, frac_diff_ffd, get_weights_ffd
@@ -160,8 +162,20 @@ def fit_preprocessor(
     return FoldPreprocessor(state=state)
 
 
-def prepare_dataset(config: PipelineConfig, snapshot: MarketSnapshot | None = None) -> PreparedDataset:
+def prepare_dataset(
+    config: PipelineConfig,
+    snapshot: MarketSnapshot | None = None,
+    *,
+    dataset_ref: PreparedDatasetRef | None = None,
+) -> PreparedDataset:
     """Load one snapshot and produce causal features, labels, and split plan."""
+    if dataset_ref is not None:
+        dataset = DatasetStore().load(dataset_ref)
+        if dataset_ref.config_hash != config.resolved_config_hash:
+            raise ValueError("Prepared dataset was created from a different effective pipeline configuration")
+        if dataset_ref.snapshot_hash != dataset.snapshot.snapshot_hash:
+            raise ValueError("Prepared dataset snapshot identity does not match its reference")
+        return dataset
     snapshot = snapshot if snapshot is not None else load_market_snapshot(config)
     feature_frame = apply_all_features(snapshot.bars, config)
     feature_columns = feature_specification(feature_frame, config)
@@ -176,6 +190,23 @@ def prepare_dataset(config: PipelineConfig, snapshot: MarketSnapshot | None = No
         exclusions=label_result.exclusions,
         config=config,
     )
+
+
+def prepare_and_store_dataset(
+    config: PipelineConfig,
+    snapshot: MarketSnapshot | None = None,
+    *,
+    store_root=None,
+) -> tuple[PreparedDatasetRef, PreparedDataset]:
+    """Prepare a dataset once and persist its immutable reusable bundle."""
+    dataset = prepare_dataset(config, snapshot=snapshot)
+    split_hash = hashlib.sha256(dataset.split_plan.model_dump_json().encode()).hexdigest()
+    reference = DatasetStore(store_root or "artifacts").write(
+        dataset,
+        config_hash=config.resolved_config_hash,
+        split_hash=split_hash,
+    )
+    return reference, dataset
 
 
 def prepare_fold(dataset: PreparedDataset, fold_spec) -> FoldBundle:

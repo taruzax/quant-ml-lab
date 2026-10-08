@@ -1,9 +1,14 @@
+from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 import numpy as np
+from threadpoolctl import threadpool_limits
 from xgboost import XGBClassifier, XGBRegressor
 
 from lab.models.base import BaseModel
+from lab.core.contracts import WindowSet
+from lab.models.devices import resolve_device
 
 
 class XGBoostModel(BaseModel):
@@ -36,8 +41,7 @@ class XGBoostModel(BaseModel):
             raise ValueError("subsample must be in (0, 1]")
         if not 0 < colsample_bytree <= 1:
             raise ValueError("colsample_bytree must be in (0, 1]")
-        if device != "cpu":
-            raise ValueError("C14 supports only device='cpu'")
+        device = resolve_device(self.model_name, device).resolved_device
 
         self.n_estimators = int(n_estimators)
         self.max_depth = int(max_depth)
@@ -52,6 +56,8 @@ class XGBoostModel(BaseModel):
         self._estimator: XGBClassifier | XGBRegressor | None = None
 
     def _prepare_features(self, X: Any, *, fitting: bool = False) -> np.ndarray:
+        if isinstance(X, WindowSet):
+            X = X.to_numpy()
         features = self.validate_features(X)
         if features.ndim == 3:
             if fitting:
@@ -120,7 +126,8 @@ class XGBoostModel(BaseModel):
             )
             train_targets = targets.reshape(-1).astype(np.float32)
             fit_kwargs = {"eval_set": [(flattened, train_targets), (stopping_flattened, stopping_targets.reshape(-1).astype(np.float32))], "verbose": False} if stopping_data is not None else {}
-            self._estimator.fit(flattened, train_targets, **fit_kwargs)
+            with threadpool_limits(limits=1, user_api="openmp"):
+                self._estimator.fit(flattened, train_targets, **fit_kwargs)
             self.classes_seen = np.asarray([], dtype=np.int8)
             self.adapter_mode = "regression"
         else:
@@ -156,7 +163,8 @@ class XGBoostModel(BaseModel):
                     **estimator_params,
                 )
                 fit_kwargs = {"eval_set": [(flattened, encoded), (stopping_flattened, stopping_encoded)], "verbose": False} if stopping_data is not None else {}
-                self._estimator.fit(flattened, encoded, **fit_kwargs)
+                with threadpool_limits(limits=1, user_api="openmp"):
+                    self._estimator.fit(flattened, encoded, **fit_kwargs)
                 self.adapter_mode = "classification"
 
         if stopping_data is not None and self._estimator is not None:
@@ -192,7 +200,9 @@ class XGBoostModel(BaseModel):
             return self.classes[np.argmax(probabilities, axis=1)]
         if self._estimator is None:
             raise RuntimeError("Regression estimator is unavailable")
-        return np.asarray(self._estimator.predict(self._prepare_features(X)), dtype=np.float64)
+        with threadpool_limits(limits=1, user_api="openmp"):
+            predictions = self._estimator.predict(self._prepare_features(X))
+        return np.asarray(predictions, dtype=np.float64)
 
     def predict_proba(self, X: Any) -> np.ndarray:
         self._require_fitted()
@@ -206,9 +216,28 @@ class XGBoostModel(BaseModel):
         if self._estimator is None:
             raise RuntimeError("Classification estimator is unavailable")
 
-        encoded_probabilities = np.asarray(self._estimator.predict_proba(features), dtype=np.float64)
+        with threadpool_limits(limits=1, user_api="openmp"):
+            encoded_probabilities = np.asarray(self._estimator.predict_proba(features), dtype=np.float64)
         probabilities = np.zeros((features.shape[0], 3), dtype=np.float64)
         for encoded_index, label in enumerate(self.classes_seen):
             class_index = int(np.flatnonzero(self.classes == label)[0])
             probabilities[:, class_index] = encoded_probabilities[:, encoded_index]
         return probabilities
+
+    def save(self, directory: str | Path) -> Path:
+        """Persist the adapter while limiting native OpenMP calls."""
+        with threadpool_limits(limits=1, user_api="openmp"):
+            return super().save(directory)
+
+    @classmethod
+    def load(cls, directory: str | Path) -> "XGBoostModel":
+        """Load a persisted adapter while limiting native OpenMP calls."""
+        with threadpool_limits(limits=1, user_api="openmp"):
+            model = super().load(directory)
+        assert isinstance(model, cls)
+        return model
+
+    def copy(self) -> "XGBoostModel":
+        """Copy the adapter and its native estimator under an OpenMP limit."""
+        with threadpool_limits(limits=1, user_api="openmp"):
+            return deepcopy(self)

@@ -52,7 +52,8 @@ class StrictModel(BaseModel):
 
 
 class DataConfig(StrictModel):
-    source: Literal["bundled_demo", "local", "provider"] = "bundled_demo"
+    source: Literal["bundled_demo", "local", "provider", "snapshot"] = "bundled_demo"
+    snapshot_id: str | None = None
     raw_data_dir: Path = Path("data/raw")
     processed_data_dir: Path = Path("data/processed")
     ticker_config_path: Path = Path("config/tickers.yaml")
@@ -62,6 +63,14 @@ class DataConfig(StrictModel):
     timeframe: Timeframe = Timeframe.H1
     calendar: str = "XNYS"
     price_adjustment: Literal["adjusted", "unadjusted"] = "adjusted"
+
+    @model_validator(mode="after")
+    def validate_snapshot_source(self) -> "DataConfig":
+        if self.source == "snapshot" and not self.snapshot_id:
+            raise ValueError("data.snapshot_id is required when data.source is 'snapshot'")
+        if self.source != "snapshot" and self.snapshot_id is not None:
+            raise ValueError("data.snapshot_id is only valid when data.source is 'snapshot'")
+        return self
 
 
 class ValidationConfig(StrictModel):
@@ -144,11 +153,12 @@ class ModelsConfig(StrictModel):
     )
     gru: ModelSpec = Field(default_factory=lambda: ModelSpec(enabled=False, params={"hidden_size": 32, "num_layers": 1}))
     lstm: ModelSpec = Field(default_factory=lambda: ModelSpec(enabled=False, params={"hidden_size": 32, "num_layers": 1}))
-    device: Literal["cpu", "cuda"] = "cpu"
+    device: Literal["auto", "cpu", "mps", "cuda"] = "cpu"
     seed: int = 42
     early_stopping: bool = False
     early_stopping_fraction: float = Field(default=0.20, gt=0.0, lt=1.0)
     early_stopping_patience: PositiveInt = 5
+    deterministic_policy: Literal["strict", "warning"] = "warning"
 
 
 class AllocationConfig(StrictModel):
@@ -184,6 +194,100 @@ class StatisticsConfig(StrictModel):
 class CampaignConfig(StrictModel):
     name: str = "local-research"
     seed: int = 42
+
+
+class IngestionStreamConfig(StrictModel):
+    name: str
+    provider: str = "yfinance"
+    tickers: tuple[str, ...] = ()
+    ticker_config_path: Path | None = None
+    calendar: str = "XNYS"
+    timeframe: Timeframe = Timeframe.D1
+    timestamp_role: Literal["session_date", "bar_open", "bar_close"] | None = None
+    provider_timezone: str = "America/New_York"
+    start_boundary: str
+    refresh_overlap_bars: PositiveInt = 1
+    completion_delay_minutes: int = Field(default=15, ge=0)
+    enabled: bool = True
+    gap_policy: Literal["reject", "allow", "record"] = "reject"
+
+    @model_validator(mode="after")
+    def validate_stream(self) -> "IngestionStreamConfig":
+        if not self.name.strip():
+            raise ValueError("Ingestion stream name must not be empty")
+        if bool(self.tickers) == (self.ticker_config_path is not None):
+            raise ValueError("Each ingestion stream must define tickers or ticker_config_path, but not both")
+        if any(not ticker.strip() for ticker in self.tickers) or len(set(self.tickers)) != len(self.tickers):
+            raise ValueError("Ingestion stream tickers must be unique and non-empty")
+        return self
+
+
+class IngestionConfig(StrictModel):
+    streams: tuple[IngestionStreamConfig, ...]
+
+    @model_validator(mode="after")
+    def validate_streams(self) -> "IngestionConfig":
+        names = [stream.name for stream in self.streams]
+        if not names:
+            raise ValueError("At least one ingestion stream is required")
+        if len(set(names)) != len(names):
+            raise ValueError("Ingestion stream names must be unique")
+        return self
+
+    @classmethod
+    def from_yaml(cls, path: str | Path = Path("config/ingestion.yaml")) -> "IngestionConfig":
+        return cls.model_validate(_read_yaml(path))
+
+
+class CampaignMatrixConfig(StrictModel):
+    name: str
+    base_pipeline_config: Path = PIPELINE_CONFIG_PATH
+    snapshot_ids: tuple[str, ...] = ()
+    feature_column_sets: tuple[tuple[str, ...], ...] = ()
+    model_parameter_overrides: tuple[dict[str, Any], ...] = ()
+    seeds: tuple[int, ...] = ()
+    allocation_overrides: tuple[dict[str, Any], ...] = ()
+    backtest_overrides: tuple[dict[str, Any], ...] = ()
+    max_planned_experiments: PositiveInt = 1
+    worker_count: PositiveInt = 1
+
+    @model_validator(mode="after")
+    def validate_matrix(self) -> "CampaignMatrixConfig":
+        if not self.name.strip():
+            raise ValueError("Campaign matrix name must not be empty")
+        for field_name in (
+            "snapshot_ids",
+            "feature_column_sets",
+            "model_parameter_overrides",
+            "seeds",
+            "allocation_overrides",
+            "backtest_overrides",
+        ):
+            values = getattr(self, field_name)
+            keys = [json.dumps(value, sort_keys=True, default=str) for value in values]
+            if len(keys) != len(set(keys)):
+                raise ValueError(f"{field_name} must not contain duplicate entries")
+        dimensions = (
+            len(self.snapshot_ids) or 1,
+            len(self.feature_column_sets) or 1,
+            len(self.model_parameter_overrides) or 1,
+            len(self.seeds) or 1,
+            len(self.allocation_overrides) or 1,
+            len(self.backtest_overrides) or 1,
+        )
+        planned = 1
+        for size in dimensions:
+            planned *= size
+        if planned > self.max_planned_experiments:
+            raise ValueError(
+                f"Campaign Cartesian product has {planned} experiments; "
+                f"max_planned_experiments is {self.max_planned_experiments}"
+            )
+        return self
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "CampaignMatrixConfig":
+        return cls.model_validate(_read_yaml(path))
 
 
 class PlatformPathsConfig(StrictModel):

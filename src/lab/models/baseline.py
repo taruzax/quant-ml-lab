@@ -25,7 +25,7 @@ class ZeroForecastBaseline(BaseModel):
         """Validate the training shape without fitting parameters."""
         features, _ = self.validate_inputs(X, y)
         self.feature_dim = int(features.shape[-1])
-        self.training_history = [{"rows": float(features.shape[0])}]
+        self.training_history = [{"rows": float(len(features))}]
         self.selected_duration = 0
         return self
 
@@ -65,7 +65,7 @@ class EmpiricalPriorBaseline(BaseModel):
             raise ValueError("Classification labels must be one of -1, 0, +1")
         self.feature_dim = int(features.shape[-1])
         self.prior = np.asarray([(labels == label).mean() for label in self.classes], dtype=np.float64)
-        self.training_history = [{"rows": float(features.shape[0])}]
+        self.training_history = [{"rows": float(len(features))}]
         self.selected_duration = 0
         return self
 

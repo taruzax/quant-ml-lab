@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from lab.core.contracts import WindowSet
 
 
 class BaseModel(ABC):
@@ -78,6 +79,8 @@ class BaseModel(ABC):
             "class_mapping": class_mapping,
             "seed": getattr(self, "seed", getattr(self, "random_state", None)),
             "device": getattr(self, "device", "cpu"),
+            "device_resolution": getattr(self, "device_resolution", None),
+            "runtime_metadata": getattr(self, "runtime_metadata", {}),
             "payload": payload_path.name,
             "payload_sha256": hashlib.sha256(payload).hexdigest(),
         }
@@ -106,7 +109,19 @@ class BaseModel(ABC):
         return model
 
     @staticmethod
-    def validate_inputs(X: Any, y: Any | None = None) -> tuple[np.ndarray, np.ndarray | None]:
+    def validate_inputs(X: Any, y: Any | None = None) -> tuple[Any, np.ndarray | None]:
+        if isinstance(X, WindowSet):
+            if len(X) == 0:
+                raise ValueError("Model features must contain at least one finite row")
+            targets = None if y is None else np.asarray(y)
+            if targets is not None:
+                try:
+                    finite_targets = np.isfinite(targets).all()
+                except TypeError as exc:
+                    raise ValueError("Model features and targets must be numeric") from exc
+                if targets.ndim == 0 or targets.shape[0] != len(X) or not finite_targets:
+                    raise ValueError("Targets must align with finite feature rows")
+            return X, targets
         features = np.asarray(X)
         if features.ndim not in {2, 3}:
             raise ValueError("Model features must have shape [N, F] or [N, T, F]")
@@ -126,7 +141,7 @@ class BaseModel(ABC):
                 raise ValueError("Targets must align with finite feature rows")
         return features, targets
 
-    def validate_features(self, X: Any) -> np.ndarray:
+    def validate_features(self, X: Any) -> Any:
         """Validate inference rows and preserve the fitted feature dimension."""
         features, _ = self.validate_inputs(X)
         if self.feature_dim is not None and features.shape[-1] != self.feature_dim:
